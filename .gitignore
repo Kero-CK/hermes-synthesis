@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.usage.json
+*.lock
+.DS_Store
