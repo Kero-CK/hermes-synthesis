@@ -16,7 +16,7 @@ I built this to help my partner with her PhD. She needed to run rigorous literat
 
 I'm not a professional developer. I build things with AI because it lets me make tools I could never have made otherwise. This project is one of them. If it's useful to other researchers, wonderful. That's the whole goal.
 
-What pushed me down the rabbit hole was **[Hermes Agent](https://github.com/NousResearch/hermes-agent) from Nous Research**. Their work is genuinely extraordinary, and it's what made a project like this feel possible for someone like me. And I have to be honest about another trigger: **DeepSeek**. Their token pricing is so low — and keeps dropping — that I could experiment freely, break things, and rerun reviews without ever worrying about cost. I'm not sure I'd have explored half as much without it.
+What pushed me down the rabbit hole was **[Hermes Agent](https://github.com/NousResearch/hermes-agent) from Nous Research**. Their work is genuinely extraordinary, and it's what made a project like this feel possible for someone like me. And I have to be honest about another trigger: **[DeepSeek](https://github.com/deepseek-ai)**. Their token pricing is so low — and keeps dropping — that I could experiment freely, break things, and rerun reviews without ever worrying about cost. I'm not sure I'd have explored half as much without it.
 
 ---
 
@@ -84,12 +84,12 @@ Hermes Synthesis is a thin layer of custom **skills** on top of general, free, s
 | Layer | Tool | Role |
 |---|---|---|
 | Orchestration | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (Nous Research) | Single agent, skills, memory, human-in-the-loop, cron, MCP |
-| Memory / RAG | GBrain | Semantic index + knowledge graph, local embeddings |
-| Vault | Obsidian | Markdown knowledge the user owns |
-| Retrieval | OpenAlex (V1) → paper-search-mcp (V2) | Scholarly metadata + citations |
-| PDF parsing | pymupdf4llm | PDF → clean Markdown |
+| Memory / RAG | [GBrain](https://github.com/garrytan/gbrain) | Semantic index + knowledge graph, local embeddings |
+| Vault | [Obsidian](https://obsidian.md) | Markdown knowledge the user owns |
+| Retrieval | [OpenAlex](https://openalex.org) (V1) → [paper-search-mcp](https://github.com/openags/paper-search-mcp) (V2) | Scholarly metadata + citations |
+| PDF parsing | [pymupdf4llm](https://github.com/pymupdf/pymupdf4llm) | PDF → clean Markdown |
 | Models | any OpenAI-compatible endpoint | You bring your key, you choose your model |
-| Container | Docker | Reproducible environment |
+| Container | [Docker](https://github.com/docker) | Reproducible environment |
 
 Each skill is a folder: a `SKILL.md` recipe (the judgment, in plain language) plus deterministic `scripts/*.py` (the mechanical work). Everything that's deterministic goes in a script; everything that needs language judgment is driven by the model. That's what keeps it token-cheap, testable, and reproducible.
 
@@ -153,7 +153,7 @@ MIT. Use it, fork it, improve it.
 
 Built on the shoulders of free, open tools that make a project like this possible for someone who isn't a professional developer:
 
-- **[Hermes Agent](https://github.com/NousResearch) by Nous Research** — the orchestration layer, and the thing that started it all. I genuinely love working with it. Their work is extraordinary, and this project exists because of it.
+- **[Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research** — the orchestration layer, and the thing that started it all. I genuinely love working with it. Their work is extraordinary, and this project exists because of it.
 - **[DeepSeek](https://github.com/deepseek-ai)** — whose low, ever-dropping token pricing turned "I could maybe try this" into "I can experiment every single day."
 - **[OpenAlex](https://openalex.org)** — free scholarly metadata and citations, no key required.
 - **[Obsidian](https://obsidian.md)** — the open, beloved Markdown vault where the knowledge capitalizes.
