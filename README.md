@@ -83,7 +83,7 @@ Hermes Synthesis is a thin layer of custom **skills** on top of general, free, s
 
 | Layer | Tool | Role |
 |---|---|---|
-| Orchestration | [Hermes Agent](https://github.com/NousResearch) (Nous Research) | Single agent, skills, memory, human-in-the-loop, cron, MCP |
+| Orchestration | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (Nous Research) | Single agent, skills, memory, human-in-the-loop, cron, MCP |
 | Memory / RAG | GBrain | Semantic index + knowledge graph, local embeddings |
 | Vault | Obsidian | Markdown knowledge the user owns |
 | Retrieval | OpenAlex (V1) → paper-search-mcp (V2) | Scholarly metadata + citations |
