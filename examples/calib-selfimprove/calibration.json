@@ -1,0 +1,60 @@
+{
+  "n_samples": 24,
+  "n_errors": 0,
+  "default_thresholds": {
+    "include": 0.75,
+    "exclude": 0.25
+  },
+  "default_metrics": {
+    "recall": 0.9167,
+    "precision": 0.9167,
+    "f1": 0.9167,
+    "cohens_kappa": 0.8333,
+    "tp": 11,
+    "fp": 1,
+    "fn": 1,
+    "tn": 11
+  },
+  "threshold_menu": [
+    {
+      "threshold_include": 0.85,
+      "threshold_exclude": 0.35,
+      "recall": 0.9167,
+      "precision": 0.9167,
+      "f1": 0.9167,
+      "ambiguous_pct": 0.0
+    },
+    {
+      "threshold_include": 0.8,
+      "threshold_exclude": 0.30000000000000004,
+      "recall": 0.9167,
+      "precision": 0.9167,
+      "f1": 0.9167,
+      "ambiguous_pct": 0.0
+    },
+    {
+      "threshold_include": 0.75,
+      "threshold_exclude": 0.25,
+      "recall": 0.9167,
+      "precision": 0.9167,
+      "f1": 0.9167,
+      "ambiguous_pct": 0.0
+    },
+    {
+      "threshold_include": 0.7,
+      "threshold_exclude": 0.19999999999999996,
+      "recall": 0.9167,
+      "precision": 0.9167,
+      "f1": 0.9167,
+      "ambiguous_pct": 33.3
+    },
+    {
+      "threshold_include": 0.65,
+      "threshold_exclude": 0.15000000000000002,
+      "recall": 0.9167,
+      "precision": 0.9167,
+      "f1": 0.9167,
+      "ambiguous_pct": 33.3
+    }
+  ]
+}
