@@ -20,14 +20,6 @@ import tempfile
 import urllib.request
 from datetime import datetime, timezone
 
-# Venv pymupdf4llm (installé dans ~/.hermes/venvs/hermes-synthesis/)
-_VENV_SITE = os.path.expanduser("~/.hermes/venvs/hermes-synthesis/lib/python3.*/site-packages")
-import glob as _glob
-for _p in _glob.glob(_VENV_SITE):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-        break
-
 
 # ---------------------------------------------------------------------------
 # Téléchargement de PDF
@@ -340,6 +332,11 @@ def main(rid: str, use_mock: bool = False):
         prisma = {}
     prisma["fulltext_assessed"] = success + failed
     prisma["excluded_fulltext"] = failed
+    # Count .md files actually produced in sources/, not just the success counter,
+    # so prisma.json reflects what's really on disk.
+    prisma["fulltext_retrieved"] = len(
+        [f for f in os.listdir(sources_dir) if f.endswith(".md")]
+    ) if os.path.isdir(sources_dir) else 0
     with open(prisma_path, "w", encoding="utf-8") as f:
         json.dump(prisma, f, indent=2, ensure_ascii=False)
 

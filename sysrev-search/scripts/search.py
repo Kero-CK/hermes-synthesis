@@ -87,6 +87,7 @@ def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[d
     import time
 
     courteous_email = os.environ.get("UNPAYWALL_EMAIL", "hermes-synthesis@example.org")
+    api_key = os.environ.get("OPENALEX_API_KEY", "")
 
     all_results = []
     expected_count = 0
@@ -103,15 +104,14 @@ def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[d
     count_checked = False
 
     while True:
+        base_params = {"filter": query, "per_page": per_page}
+        if api_key:
+            base_params["api_key"] = api_key
         if use_cursor:
             cur_val = cursor if cursor else "*"
-            params = urllib.parse.urlencode({
-                "search": query, "per_page": per_page, "cursor": cur_val,
-            })
+            params = urllib.parse.urlencode({**base_params, "cursor": cur_val})
         else:
-            params = urllib.parse.urlencode({
-                "search": query, "per_page": per_page, "page": page,
-            })
+            params = urllib.parse.urlencode({**base_params, "page": page})
         url = f"https://api.openalex.org/works?{params}"
 
         # --- Retry avec backoff exponentiel sur 429 et 5xx ---
@@ -370,6 +370,10 @@ def main(rid: str, queries: dict[str, str], use_mock: bool = False):
         print("   Lance d'abord la skill protocol.", file=sys.stderr)
         sys.exit(1)
 
+    # TODO: read the year window from protocol.md and inject it into the
+    # OpenAlex filter (from_publication_date) automatically, instead of
+    # relying on a well-formed query passed in by hand. Skipped for now —
+    # low priority, adds complexity/risk for a run that already works.
     search_fn = mock_search if use_mock else mcp_search
     rows: list[dict] = []
     search_meta: dict[str, dict] = {}  # source → {retrieved, expected, status, reason}

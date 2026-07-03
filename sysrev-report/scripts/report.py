@@ -173,9 +173,10 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         f"| Identifiés (recherche) | {prisma.get('identified', '?')} |",
         f"| Après déduplication | {prisma.get('after_dedup', '?')} |",
         f"| Screenés (titres + abstracts) | {prisma.get('screened', '?')} |",
-        f"| Textes intégraux évalués | {prisma.get('fulltext_assessed', '?')} |",
-        f"| Exclus (fulltext) | {prisma.get('excluded_fulltext', '?')} |",
-        f"| **Inclus dans la synthèse** | **{prisma.get('fulltext_assessed', 0) - prisma.get('excluded_fulltext', 0)}** |",
+        f"| **Inclus après screening** | **{prisma.get('included', '?')}** |",
+        f"| Textes intégraux récupérés | {prisma.get('fulltext_retrieved', '?')} |",
+        f"| Non récupérés (limitation d'accès) | {prisma.get('included', 0) - prisma.get('fulltext_retrieved', 0)} |",
+        f"| **Extraits et synthétisés** | **{prisma.get('fulltext_retrieved', '?')}** |",
     ]
     lines.extend([
         "---",
@@ -308,7 +309,8 @@ def generate_prisma_diagram(prisma: dict) -> str:
     screened = prisma.get("screened", 0)
     fulltext = prisma.get("fulltext_assessed", 0)
     excluded_ft = prisma.get("excluded_fulltext", 0)
-    included = fulltext - excluded_ft
+    included = prisma.get("included", 0)
+    fulltext_retrieved = prisma.get("fulltext_retrieved", fulltext)
 
     return f"""# Diagramme de flux PRISMA
 
@@ -316,14 +318,16 @@ def generate_prisma_diagram(prisma: dict) -> str:
 flowchart TD
     A["Articles identifiés<br/>n = {identified}"] --> B["Après déduplication<br/>n = {after_dedup}"]
     B --> C["Articles screenés<br/>(titres + abstracts)<br/>n = {screened}"]
-    C --> D["Exclus au screening<br/>n = {screened - fulltext}"]
-    C --> E["Textes intégraux évalués<br/>n = {fulltext}"]
-    E --> F["Exclus (fulltext)<br/>n = {excluded_ft}"]
-    E --> G["**Articles inclus**<br/>**n = {included}**"]
+    C --> D["Exclus au screening<br/>n = {screened - included}"]
+    C --> E["**Inclus après screening**<br/>**n = {included}**"]
+    E --> F["Textes intégraux récupérés<br/>n = {fulltext_retrieved}"]
+    E --> H["Non récupérés<br/>(paywall / pas d'OA)<br/>n = {included - fulltext_retrieved}"]
+    F --> G["**Extraits et synthétisés**<br/>**n = {fulltext_retrieved}**"]
 
+    style E fill:#4CAF50,color:#fff
     style G fill:#4CAF50,color:#fff
     style D fill:#f44336,color:#fff
-    style F fill:#f44336,color:#fff
+    style H fill:#ff9800,color:#fff
 ```
 """
 
@@ -444,12 +448,13 @@ def main(rid: str, use_mock: bool = False):
     print(f"   📁 Vault      : {base}/ (via symlink)")
 
     # Résumé
-    included = prisma.get("fulltext_assessed", 0) - prisma.get("excluded_fulltext", 0)
+    included = prisma.get("included", 0)
+    synthesized = prisma.get("fulltext_retrieved", 0)
     print(f"""
 📊 Rapport généré :
 
    📄 report.md      — synthèse narrative
-   📊 prisma.md      — diagramme de flux ({prisma.get('identified', '?')} → {included} inclus)
+   📊 prisma.md      — diagramme de flux ({prisma.get('identified', '?')} → {included} inclus → {synthesized} synthétisés)
    📚 export.ris     — {len(ris_content.split('ER  -')) - 1 if ris_content else 0} références
 
    📁 Dossier : {base}/

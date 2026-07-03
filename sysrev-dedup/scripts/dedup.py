@@ -13,7 +13,7 @@ Usage:
   python3 dedup.py '<json>'
 
 JSON attendu:
-  {"id": "ma-revue", "threshold": 0.85}
+  {"id": "ma-revue", "threshold": 0.90}
 """
 
 import csv
@@ -90,7 +90,7 @@ def log_decision(base: str, kept_doi: str, merged_dois: list[str], reason: str):
 # Point d'entrée
 # ---------------------------------------------------------------------------
 
-def main(rid: str, threshold: float = 0.85):
+def main(rid: str, threshold: float = 0.90):
     base = f"/reviews/{rid}"
     csv_path = f"{base}/candidates.csv"
     raw_path = f"{base}/candidates_raw.csv"
@@ -99,19 +99,27 @@ def main(rid: str, threshold: float = 0.85):
         print(f"❌ {csv_path} introuvable. Lance d'abord la skill search.", file=sys.stderr)
         sys.exit(1)
 
-    # Chargement
-    with open(csv_path, newline="", encoding="utf-8") as f:
+    # Backup: only created once. candidates_raw.csv is the stable source of
+    # truth for every dedup run — never overwrite it with an already-deduped file.
+    if not os.path.exists(raw_path):
+        shutil.copy2(csv_path, raw_path)
+        print(f"📋 Backup créé : {raw_path}")
+    else:
+        print(f"📋 Backup existant conservé : {raw_path}")
+
+    # Chargement — toujours depuis le backup, pour que dedup soit rejouable
+    with open(raw_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
 
     original_count = len(rows)
     if original_count == 0:
-        print("⚠️  candidates.csv est vide, rien à dédupliquer.")
+        print("⚠️  candidates_raw.csv est vide, rien à dédupliquer.")
         return
 
-    # Backup
-    shutil.copy2(csv_path, raw_path)
-    print(f"📋 Backup : {raw_path} ({original_count} lignes)")
+    source_totals: dict[str, int] = {}
+    for r in rows:
+        source_totals[r.get("source", "?")] = source_totals.get(r.get("source", "?"), 0) + 1
 
     # --- Passe 1 : DOI exact ---
     doi_groups: dict[str, list[dict]] = {}
@@ -133,11 +141,22 @@ def main(rid: str, threshold: float = 0.85):
                     pass1_removed += 1
 
     # --- Passe 2 : similarité de titre ---
+    # N'opère que sur les articles SANS DOI : deux articles ayant chacun un DOI
+    # distinct ne doivent jamais être fusionnés par similarité de titre (le DOI
+    # fait foi). Ça évite de fusionner des articles différents d'un corpus
+    # mono-thématique dont les titres partagent un squelette commun.
     pass2_removed = 0
+    pass2_source_removed: dict[str, int] = {}
     i = 0
     while i < len(rows):
+        if rows[i].get("doi", "").strip():
+            i += 1
+            continue
         j = i + 1
         while j < len(rows):
+            if rows[j].get("doi", "").strip():
+                j += 1
+                continue
             sim = title_similarity(rows[i]["title"], rows[j]["title"])
             if sim >= threshold:
                 best = pick_best([rows[i], rows[j]])
@@ -151,6 +170,8 @@ def main(rid: str, threshold: float = 0.85):
                     ],
                     f"titre similaire (ratio={sim:.3f})",
                 )
+                src = worst.get("source", "?")
+                pass2_source_removed[src] = pass2_source_removed.get(src, 0) + 1
                 if worst is rows[i]:
                     rows[i] = rows[j]  # garde la ligne j, supprime i
                 rows.pop(j)
@@ -160,6 +181,15 @@ def main(rid: str, threshold: float = 0.85):
             else:
                 j += 1
         i += 1
+
+    for src, removed in pass2_source_removed.items():
+        total = source_totals.get(src, 0)
+        if total and removed / total > 0.10:
+            print(
+                f"⚠️  Passe titre : {removed}/{total} ({removed / total:.0%}) fusionnés "
+                f"pour la source '{src}' — taux élevé, vérifie les résultats.",
+                file=sys.stderr,
+            )
 
     total_removed = pass1_removed + pass2_removed
     final_count = len(rows)
@@ -207,7 +237,7 @@ def main(rid: str, threshold: float = 0.85):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: dedup.py '<json>'", file=sys.stderr)
-        print('  {"id": "ma-revue", "threshold": 0.85}', file=sys.stderr)
+        print('  {"id": "ma-revue", "threshold": 0.90}', file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -217,7 +247,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     rid = payload.get("id")
-    threshold = float(payload.get("threshold", 0.85))
+    threshold = float(payload.get("threshold", 0.90))
 
     if not rid:
         print("JSON invalide : 'id' requis.", file=sys.stderr)
