@@ -154,10 +154,10 @@ MIT. Use it, fork it, improve it.
 Built on the shoulders of free, open tools that make a project like this possible for someone who isn't a professional developer:
 
 - **[Hermes Agent](https://github.com/NousResearch) by Nous Research** — the orchestration layer, and the thing that started it all. I genuinely love working with it. Their work is extraordinary, and this project exists because of it.
-- **DeepSeek** — whose low, ever-dropping token pricing turned "I could maybe try this" into "I can experiment every single day."
+- **[DeepSeek](https://github.com/deepseek-ai)** — whose low, ever-dropping token pricing turned "I could maybe try this" into "I can experiment every single day."
 - **[OpenAlex](https://openalex.org)** — free scholarly metadata and citations, no key required.
 - **[Obsidian](https://obsidian.md)** — the open, beloved Markdown vault where the knowledge capitalizes.
-- **GBrain**, **Docker**, and **pymupdf4llm** — the rest of the backbone.
+- **[GBrain](https://github.com/garrytan/gbrain)**, **[Docker](https://github.com/docker)**, and **[pymupdf4llm](https://github.com/pymupdf/pymupdf4llm)** — the rest of the backbone.
 
 ---
 
