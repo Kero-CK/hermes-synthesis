@@ -2,6 +2,8 @@
 
 **A self-hosted, open-source, auditable literature-review agent for researchers.**
 
+![Hermes Synthesis dashboard](assets/dashboard-hero.png)
+
 Hermes Synthesis runs a complete systematic/scoping review pipeline — from research question to a PRISMA flow diagram and a bibliography export — on your own machine. Every decision it makes is logged. Every extracted fact is traceable to a verbatim quote in the source. Nothing leaves your environment except the API calls to the model you choose.
 
 I'm building it in the open. It works end-to-end today, but it's early and honest about its limits. Read the [Status](#status) section before you trust it with anything important.
@@ -59,7 +61,8 @@ Honest snapshot. This is build-in-public, not a product launch.
 
 | Area | State |
 |---|---|
-| End-to-end pipeline (7 core skills) | ✅ Works, tested on a real ~50-article corpus |
+| Default mode | scoping review (PRISMA-ScR) |
+| End-to-end pipeline (7 core skills) | ✅ Works, validated on a real 86-article scoping review (86 → 75 → 47, ~$0.38 in tokens) |
 | Scholarly search (OpenAlex, free, no key) | ✅ Working, with full pagination + failure states |
 | LLM screening / extraction / synthesis | ✅ Working (OpenAI-compatible endpoint; I use DeepSeek v4) |
 | PDF parsing (open-access + dropzone) | ✅ Working |
@@ -100,6 +103,7 @@ This is built for **power users** — researchers comfortable with a terminal, D
 - A running Hermes Agent instance
 - An OpenAI-compatible LLM endpoint + API key (I use **DeepSeek v4** — Flash for high-volume screening/extraction, the reasoning model for synthesis; a full review costs roughly $0.30–1 in tokens)
 - Optionally: an Obsidian vault for capitalized deliverables
+- `pymupdf4llm` must currently be installed inside the running container (`pip install pymupdf4llm`) — a persistent build-time setup is planned.
 
 > Detailed setup instructions are coming as the project stabilizes. If you're trying it early and get stuck, open an issue — your questions will shape the docs.
 
