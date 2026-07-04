@@ -13,8 +13,17 @@ Usage:
 JSON attendu:
   {"id": "ma-revue", "queries": {"openalex": "...", "crossref": "..."}}
 
+  La requête openalex est passée telle quelle au paramètre `filter=` de
+  l'API OpenAlex (PAS `search=`) : elle doit donc être en syntaxe filter
+  structurée, pas du texte libre. Exemple valide :
+    "title.search:self-improving,title_and_abstract.search:LLM agent,from_publication_date:2022-01-01"
+  Voir https://docs.openalex.org/api-entities/works/filter-works pour la
+  syntaxe complète (title.search, title_and_abstract.search,
+  from_publication_date, etc., séparés par des virgules = ET logique).
+
 Sources câblées :
-  - openalex : API gratuite, ~250M articles, pas de clé (docs.openalex.org)
+  - openalex : ~250M articles (docs.openalex.org). Nécessite une clé API
+    depuis février 2026 — lue depuis OPENALEX_API_KEY dans l'environnement.
   - crossref, pubmed : via paper-search-mcp (TODO)
 
 Le script ne prend AUCUNE décision de recherche : les requêtes sont déjà
@@ -31,8 +40,19 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
-# Recherche réelle — OpenAlex (gratuit, sans clé API)
+# Recherche réelle — OpenAlex (clé API requise depuis février 2026)
 # ---------------------------------------------------------------------------
+
+
+def _looks_like_filter_syntax(query: str) -> bool:
+    """
+    Heuristique : une requête filter OpenAlex valide contient au moins un
+    champ structuré du type `champ.search:...` ou `champ:...`
+    (ex. title.search:, from_publication_date:). Du texte libre sans ':'
+    n'est jamais une syntaxe filter valide et provoquerait un HTTP 400.
+    """
+    return ":" in query
+
 
 def _reconstruct_abstract(inverted_index: dict | None) -> str:
     """
@@ -68,8 +88,13 @@ def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[d
 
     status ∈ {"complete", "incomplete", "capped", "error"}
 
-    API gratuite, sans clé. Rate limit : 10 req/s (pool courtois), 100k/jour.
-    Docs : https://docs.openalex.org/
+    Clé API requise depuis février 2026 (lue depuis OPENALEX_API_KEY).
+    Rate limit : 10 req/s (pool courtois), 100k/jour. Docs : https://docs.openalex.org/
+
+    `query` est passée telle quelle au paramètre `filter=` de l'API — elle
+    doit être en syntaxe filter structurée (ex. "title.search:X,from_publication_date:2023-01-01"),
+    pas du texte libre. Une requête sans syntaxe filter reconnaissable est
+    rejetée avant l'appel réseau plutôt que de provoquer un HTTP 400 opaque.
 
     Pagination par page (per_page=200) jusqu'à épuisement.
     Garde-fou : arrêt à 2000 résultats avec avertissement.
@@ -85,6 +110,19 @@ def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[d
     import urllib.request
     import urllib.parse
     import time
+
+    if not _looks_like_filter_syntax(query):
+        print(
+            "  ❌ Requête OpenAlex invalide : ceci ressemble à du texte libre, "
+            "pas à une syntaxe filter.\n"
+            "     Le paramètre filter= d'OpenAlex exige une syntaxe structurée, "
+            "ex. :\n"
+            '     "title.search:self-improving,title_and_abstract.search:LLM agent,'
+            'from_publication_date:2022-01-01"\n'
+            "     Voir https://docs.openalex.org/api-entities/works/filter-works",
+            file=sys.stderr,
+        )
+        return [], 0, "error", "requête invalide : pas de syntaxe filter (texte libre détecté)"
 
     courteous_email = os.environ.get("UNPAYWALL_EMAIL", "hermes-synthesis@example.org")
     api_key = os.environ.get("OPENALEX_API_KEY", "")
@@ -222,7 +260,7 @@ def mcp_search(source: str, query: str) -> tuple[list[dict], int, str, str]:
     Retourne (results, expected_count, is_complete).
 
     Sources supportées :
-      - openalex : API gratuite, ≈250M articles, pas de clé
+      - openalex : ≈250M articles, clé API requise depuis février 2026 (OPENALEX_API_KEY)
       - crossref  : TODO (API gratuite, métadonnées DOI)
       - pubmed    : TODO (via paper-search-mcp)
 
