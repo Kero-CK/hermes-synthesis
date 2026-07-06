@@ -2,7 +2,7 @@
 
 **A self-hosted, open-source, auditable literature-review agent for researchers.**
 
-![Hermes Synthesis dashboard](assets/dashboard-hero.png)
+![Hermes Synthesis dashboard](assets/dashboard-hero1.jpg)
 
 Hermes Synthesis runs a complete systematic/scoping review pipeline — from research question to a PRISMA flow diagram and a bibliography export — on your own machine. Every decision it makes is logged. Every extracted fact is traceable to a verbatim quote in the source. Nothing leaves your environment except the API calls to the model you choose.
 
