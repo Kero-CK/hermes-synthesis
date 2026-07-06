@@ -10,6 +10,27 @@ I'm building it in the open. It works end-to-end today, but it's early and hones
 
 ---
 
+## What you need to run this
+
+This is built for **power users** — researchers comfortable with a terminal, Docker, environment variables, and an API key. It's self-hosted and takes some setup — it's not plug-and-play yet.
+
+**To run a review:**
+- Docker, plus a running [Hermes Agent](https://github.com/NousResearch/hermes-agent) instance (the orchestrator)
+- An OpenAI-compatible LLM endpoint and API key (`LLM_API_ENDPOINT`, `LLM_API_KEY`, `LLM_SCREENING_MODEL`) — I use DeepSeek; a full review costs roughly $0.30–1 in tokens
+- An OpenAlex API key (`OPENALEX_API_KEY`) — required since February 2026
+- A Python venv with `pymupdf4llm` for full-text PDF parsing:
+  ```bash
+  uv venv ~/.hermes/venvs/hermes-synthesis
+  uv pip install pymupdf4llm --python ~/.hermes/venvs/hermes-synthesis/bin/python
+  ```
+
+**For the second-brain / companion layer (optional):**
+- An Obsidian vault, symlinked to `/reviews`, if you want every report and decision log to land directly in a vault you own
+
+> Detailed setup instructions are coming as the project stabilizes. If you're trying it early and get stuck, open an issue — your questions will shape the docs.
+
+---
+
 ## Why this exists
 
 I built this to help my partner with her PhD. She needed to run rigorous literature reviews, and the closed research assistants out there work by *session*: you ask a question, they answer, and nothing you accumulate persists or belongs to you. I wanted the opposite — a tool where every review is reproducible, every decision is auditable, and the knowledge builds up in a vault the researcher owns.
@@ -63,7 +84,7 @@ Honest snapshot. This is build-in-public, not a product launch.
 |---|---|
 | Default mode | scoping review (PRISMA-ScR) |
 | End-to-end pipeline (7 core skills) | ✅ Works, validated on a real 86-article scoping review (86 → 75 → 47, ~$0.38 in tokens) |
-| Scholarly search (OpenAlex, free, no key) | ✅ Working, with full pagination + failure states |
+| Scholarly search (OpenAlex, key required since Feb 2026) | ✅ Working, with full pagination + failure states |
 | LLM screening / extraction / synthesis | ✅ Working (OpenAI-compatible endpoint; I use DeepSeek v4) |
 | PDF parsing (open-access + dropzone) | ✅ Working |
 | Audit log, PRISMA export, RIS export | ✅ Working |
@@ -92,20 +113,6 @@ Hermes Synthesis is a thin layer of custom **skills** on top of general, free, s
 | Container | [Docker](https://github.com/docker) | Reproducible environment |
 
 Each skill is a folder: a `SKILL.md` recipe (the judgment, in plain language) plus deterministic `scripts/*.py` (the mechanical work). Everything that's deterministic goes in a script; everything that needs language judgment is driven by the model. That's what keeps it token-cheap, testable, and reproducible.
-
----
-
-## Requirements
-
-This is built for **power users** — researchers comfortable with a terminal, Docker, environment variables, and an API key.
-
-- Docker
-- A running Hermes Agent instance
-- An OpenAI-compatible LLM endpoint + API key (I use **DeepSeek v4** — Flash for high-volume screening/extraction, the reasoning model for synthesis; a full review costs roughly $0.30–1 in tokens)
-- Optionally: an Obsidian vault for capitalized deliverables
-- `pymupdf4llm` must currently be installed inside the running container (`pip install pymupdf4llm`) — a persistent build-time setup is planned.
-
-> Detailed setup instructions are coming as the project stabilizes. If you're trying it early and get stuck, open an issue — your questions will shape the docs.
 
 ---
 
