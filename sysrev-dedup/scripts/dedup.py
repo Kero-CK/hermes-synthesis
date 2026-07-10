@@ -96,15 +96,18 @@ def main(rid: str, threshold: float = 0.90):
     base = f"/reviews/{rid}"
     csv_path = f"{base}/candidates.csv"
     raw_path = f"{base}/candidates_raw.csv"
+    manifest_path = f"{base}/manifest.json"
     run_id = datetime.now(timezone.utc).isoformat()
 
     if not os.path.exists(csv_path):
         print(f"❌ {csv_path} introuvable. Lance d'abord la skill search.", file=sys.stderr)
         sys.exit(1)
 
-    # Backup: only created once. candidates_raw.csv is the stable source of
-    # truth for every dedup run — never overwrite it with an already-deduped file.
-    if not os.path.exists(raw_path):
+    manifest = json.load(open(manifest_path, encoding="utf-8"))
+    if manifest.get("stage") == "search_done":
+        shutil.copy2(csv_path, raw_path)
+        print(f"📋 Backup rafraîchi depuis la nouvelle recherche : {raw_path}")
+    elif not os.path.exists(raw_path):
         shutil.copy2(csv_path, raw_path)
         print(f"📋 Backup créé : {raw_path}")
     else:
@@ -219,8 +222,6 @@ def main(rid: str, threshold: float = 0.90):
         json.dump(prisma, f, indent=2, ensure_ascii=False)
 
     # Mise à jour manifest.json
-    manifest_path = f"{base}/manifest.json"
-    manifest = json.load(open(manifest_path, encoding="utf-8"))
     manifest["stage"] = "dedup_done"
     manifest["dedup_threshold"] = threshold
     manifest["dedup_removed"] = total_removed
