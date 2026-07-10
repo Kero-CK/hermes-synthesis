@@ -5,7 +5,7 @@ description: >
   Télécharge les PDF open access, parse les PDF dropzone, convertit le tout
   en Markdown exploitable. Correspond au module M5 du pipeline Hermes Synthesis.
 inputs:
-  - /reviews/<id>/decisions.jsonl (articles avec decision=include)
+  - /reviews/<id>/decisions.jsonl (décisions de screening finales)
   - /reviews/<id>/candidates.csv (pour les URLs OA et chemins dropzone)
   - /reviews/<id>/inputs/pdfs/ (dropzone)
   - /reviews/<id>/manifest.json (stage = "screen_done" ou "review_done")
@@ -29,13 +29,14 @@ suivantes (extraction notamment).
 # Pré-conditions
 
 - `manifest.json` indique `stage = "screen_done"` ou `"review_done"`
-- `decisions.jsonl` contient des décisions `include` (tous stages : auto `screen_title_abstract` ET humain `human_review`)
+- `decisions.jsonl` contient des décisions de screening automatiques ou humaines
 - `candidates.csv` contient les URLs OA et les chemins dropzone
 
 # Procédure
 
-1. Identifie les articles à traiter : ceux avec `decision = "include"`
-   dans `decisions.jsonl`.
+1. Identifie les articles à traiter depuis les stages de screening. Une décision
+   humaine prime toujours sur une décision automatique ; à priorité égale, la
+   dernière décision gagne.
 
 2. Exécute le script :
    ```
@@ -53,30 +54,30 @@ suivantes (extraction notamment).
    - Cherche le PDF : URL open access d'abord, dropzone ensuite
    - Parse le PDF en Markdown (via `pymupdf4llm` en mode réel)
    - Écrit le résultat dans `sources/<doi_safe>.md`
-   - Si le parsing échoue, marque `needs_manual`
+   - Si le parsing échoue, marque `retrieval_failed`
 
 4. Présente le résumé : combien récupérés, combien en échec.
 
 # Règles
 
 - **Ne jamais inventer de contenu.** Si le PDF est inaccessible, passer
-  en `needs_manual` plutôt que de générer un faux texte.
+  en `retrieval_failed` plutôt que de générer un faux texte.
 - **Nom de fichier sûr.** Remplacer `/` par `_` dans les DOI pour les
   noms de fichiers (`10.1234_mock001.md`).
-- **Chemin d'échec.** Parsing raté → `needs_manual` journalisé dans
+- **Chemin d'échec.** Parsing raté → `retrieval_failed` journalisé dans
   `decisions.jsonl`, jamais un trou silencieux.
 
 # Journalisation
 
 Pour chaque article :
 ```json
-{"ts":"...","doc":"10.xxx","stage":"fulltext","decision":"include",
+{"ts":"...","doc":"10.xxx","stage":"fulltext","decision":"retrieved",
  "reason":"PDF parsé avec succès (OA)"}
 ```
 
 En cas d'échec :
 ```json
-{"ts":"...","doc":"10.xxx","stage":"fulltext","decision":"needs_manual",
+{"ts":"...","doc":"10.xxx","stage":"fulltext","decision":"retrieval_failed",
  "reason":"PDF inaccessible (OA URL 404, pas de dropzone)"}
 ```
 
@@ -86,14 +87,15 @@ Mise à jour :
 
 # Pièges connus
 
-- **Stage filter trop restrictif (corrigé)** : l'ancienne version du script
-  filtrait uniquement `stage == "screen_title_abstract"`, ce qui ignorait
-  les articles inclus par décision humaine (`stage == "human_review"`).
-  Le script accepte maintenant TOUS les articles avec `decision == "include"`,
-  quel que soit leur stage.
+- **Compatibilité des anciens journaux.** `screen_manual` est lu comme alias de
+  `human_review`. Les anciens tuples `fulltext/include` et
+  `fulltext/needs_manual` restent reconnus comme `retrieved` et
+  `retrieval_failed`, mais les nouveaux événements utilisent uniquement le
+  vocabulaire canonique. Tout tuple inconnu est signalé et compté dans
+  `manifest.json` sous `journal_unknown_entries`.
 - **Paywalls (403 Forbidden)** : de nombreux éditeurs (Elsevier, Springer, Wiley)
   bloquent le téléchargement automatisé. Les articles sans OA accessible
-  passent en `needs_manual`. L'utilisateur peut déposer les PDF manuellement
+  passent en `retrieval_failed`. L'utilisateur peut déposer les PDF manuellement
   dans `inputs/pdfs/<doi_safe>.pdf`.
 - **pymupdf4llm requis** : le parsing réel nécessite `pymupdf4llm`. Le venv
   recommandé est `~/.hermes/venvs/hermes-synthesis/`. Installation :

@@ -57,7 +57,7 @@ citation verbatim du texte source.
 4. Écrit `extraction.csv` avec les colonnes :
    `doi | variable | valeur | citation | section`
 
-5. Si « NON TROUVÉ » pour une variable, marque `needs_manual` dans le journal.
+5. Si « NON TROUVÉ » pour une variable, marque `not_found` dans le journal.
 
 # Règles
 
@@ -81,8 +81,13 @@ doi,variable,valeur,citation,section
 
 ```json
 {"ts":"...","doc":"10.xxx","stage":"extract","variable":"secteur",
- "decision":"include","reason":"Extraction réussie"}
+ "decision":"extracted","reason":"Extraction réussie"}
 ```
+
+Les échecs documentaires utilisent `not_found` et les échecs techniques
+`api_error`. Les anciens tuples `extract/include` et `extract/needs_manual`
+restent reconnus en lecture comme alias de `extracted` et `not_found`. Tout tuple
+inconnu est signalé et compté dans `manifest["journal_unknown_entries"]`.
 
 Mise à jour :
 - `manifest.json` : `stage = "extract_done"`, `extraction_total`, `extraction_not_found`

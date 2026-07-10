@@ -22,6 +22,22 @@ import sys
 from datetime import datetime, timezone
 
 
+KNOWN_JOURNAL_VOCABULARY = {
+    "dedup": {"merge"},
+    "screen_title_abstract": {"include", "exclude", "needs_manual"},
+    "human_review": {"include", "exclude"},
+    "screen_manual": {"include", "exclude"},  # alias historique
+    "fulltext": {"retrieved", "retrieval_failed", "include", "needs_manual"},
+    "extract": {"extracted", "not_found", "api_error", "include", "needs_manual"},
+}
+
+
+def is_known_journal_entry(entry: dict) -> bool:
+    """Vérifie le couple stage/décision, y compris les alias historiques."""
+    stage = entry.get("stage")
+    return entry.get("decision") in KNOWN_JOURNAL_VOCABULARY.get(stage, set())
+
+
 # ---------------------------------------------------------------------------
 # Extraction réelle via LLM — double passe anti-hallucination
 # ---------------------------------------------------------------------------
@@ -247,13 +263,30 @@ def main(rid: str, use_mock: bool = False):
     protocol_path = f"{base}/protocol.md"
     decisions_path = f"{base}/decisions.jsonl"
 
-    # Identifie les articles inclus (fulltext récupéré)
+    # Identifie les articles dont le fulltext a été récupéré.
     included_dois: list[str] = []
+    unknown_entries = 0
     with open(decisions_path, encoding="utf-8") as f:
-        for line in f:
-            entry = json.loads(line.strip())
-            if entry.get("stage") == "fulltext" and entry.get("decision") == "include":
+        for line_number, line in enumerate(f, 1):
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            if not is_known_journal_entry(entry):
+                unknown_entries += 1
+                print(
+                    f"⚠️  Journal ligne {line_number} : tuple inconnu "
+                    f"(stage={entry.get('stage')!r}, decision={entry.get('decision')!r})",
+                    file=sys.stderr,
+                )
+                continue
+            if entry.get("stage") == "fulltext" and entry.get("decision") in ("retrieved", "include"):
                 included_dois.append(entry["doc"])
+
+    manifest_path = f"{base}/manifest.json"
+    manifest = json.load(open(manifest_path, encoding="utf-8"))
+    manifest["journal_unknown_entries"] = unknown_entries
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     if not included_dois:
         print("⚠️  Aucun article avec fulltext récupéré trouvé.")
@@ -328,11 +361,11 @@ def main(rid: str, use_mock: bool = False):
                 print(f"  ❌ {doi_safe} / {var['name']} → ERREUR API")
             elif valeur == "NON TROUVÉ":
                 not_found += 1
-                log_decision(base, doi, var["name"], "needs_manual",
+                log_decision(base, doi, var["name"], "not_found",
                              f"Variable '{var['name']}' non trouvée dans le texte")
                 print(f"  ⚠️  {doi_safe} / {var['name']} → NON TROUVÉ")
             else:
-                log_decision(base, doi, var["name"], "include",
+                log_decision(base, doi, var["name"], "extracted",
                              f"Extraction réussie ({len(citation)} caractères)")
                 print(f"  ✅ {doi_safe} / {var['name']} → {valeur[:60]}")
 
@@ -345,8 +378,6 @@ def main(rid: str, use_mock: bool = False):
         w.writerows(rows)
 
     # Mise à jour manifest.json
-    manifest_path = f"{base}/manifest.json"
-    manifest = json.load(open(manifest_path, encoding="utf-8"))
     manifest["stage"] = "extract_done"
     manifest["extraction_total"] = total
     manifest["extraction_not_found"] = not_found
