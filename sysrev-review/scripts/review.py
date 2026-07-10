@@ -27,6 +27,23 @@ import sys
 from datetime import datetime, timezone
 
 
+def resolve_screening_decisions(entries: list[dict]) -> dict[str, str]:
+    """Résout l'éligibilité finale avec priorité aux décisions humaines."""
+    machine: dict[str, str] = {}
+    human: dict[str, str] = {}
+    for entry in entries:
+        doc = entry.get("doc", "")
+        decision = entry.get("decision")
+        stage = entry.get("stage")
+        if not doc or decision not in ("include", "exclude"):
+            continue
+        if stage in ("human_review", "screen_manual"):
+            human[doc] = decision
+        elif stage == "screen_title_abstract":
+            machine[doc] = decision
+    return {doc: human.get(doc, decision) for doc, decision in machine.items()} | human
+
+
 def apply_decisions(rid: str, decisions: dict):
     """Persiste les décisions humaines sur des cas ambigus."""
     base = f"/reviews/{rid}"
@@ -51,10 +68,21 @@ def apply_decisions(rid: str, decisions: dict):
 
     cases_by_doi = {c.get("doi"): c for c in cases if c.get("doi")}
 
+    existing_entries = []
+    if os.path.exists(decisions_path):
+        with open(decisions_path, encoding="utf-8") as f:
+            existing_entries = [json.loads(line) for line in f if line.strip()]
+    latest_human: dict[str, str] = {}
+    for entry in existing_entries:
+        if entry.get("stage") in ("human_review", "screen_manual"):
+            if entry.get("doc") and entry.get("decision") in ("include", "exclude"):
+                latest_human[entry["doc"]] = entry["decision"]
+
     now = datetime.now(timezone.utc).isoformat()
     entries = []
     included_manual = 0
     excluded_manual = 0
+    handled = 0
 
     for key, decision in decisions.items():
         if decision not in ("include", "exclude"):
@@ -73,10 +101,16 @@ def apply_decisions(rid: str, decisions: dict):
             print(f"⚠️  Cas introuvable pour la clé '{key}' (ignorée)", file=sys.stderr)
             continue
 
+        doc = case.get("doi", "")
+        handled += 1
+        if doc and latest_human.get(doc) == decision:
+            print(f"⚠️  Décision humaine déjà journalisée pour {doc} — rejeu ignoré")
+            continue
+
         entries.append({
             "ts": now,
             "run": now,
-            "doc": case.get("doi", ""),
+            "doc": doc,
             "stage": "human_review",
             "decision": decision,
             "score": case.get("score", ""),
@@ -88,8 +122,10 @@ def apply_decisions(rid: str, decisions: dict):
             included_manual += 1
         else:
             excluded_manual += 1
+        if doc:
+            latest_human[doc] = decision
 
-    if not entries:
+    if not handled:
         print("⚠️  Aucune décision valide à appliquer.")
         return
 
@@ -97,29 +133,36 @@ def apply_decisions(rid: str, decisions: dict):
         for entry in entries:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    # Mise à jour prisma.json : included = inclus auto + inclus manuels
+    all_entries = existing_entries + entries
+    final_decisions = resolve_screening_decisions(all_entries)
+    remaining_cases = [
+        case for case in cases
+        if not case.get("doi") or case.get("doi") not in latest_human
+    ]
+
+    # Mise à jour prisma.json depuis l'état final du journal
     prisma = json.load(open(prisma_path, encoding="utf-8")) if os.path.exists(prisma_path) else {}
-    prisma["included"] = prisma.get("included", 0) + included_manual
-    prisma["needs_manual_pending"] = max(
-        0, prisma.get("needs_manual_pending", 0) - len(entries)
-    )
+    prisma["included"] = sum(1 for decision in final_decisions.values() if decision == "include")
+    prisma["needs_manual_pending"] = len(remaining_cases)
     with open(prisma_path, "w", encoding="utf-8") as f:
         json.dump(prisma, f, indent=2, ensure_ascii=False)
 
     # Mise à jour manifest.json
     manifest = json.load(open(manifest_path, encoding="utf-8")) if os.path.exists(manifest_path) else {"id": rid}
     manifest["stage"] = "review_done"
-    manifest["manual_included"] = manifest.get("manual_included", 0) + included_manual
-    manifest["manual_excluded"] = manifest.get("manual_excluded", 0) + excluded_manual
+    manifest["manual_included"] = sum(1 for decision in latest_human.values() if decision == "include")
+    manifest["manual_excluded"] = sum(1 for decision in latest_human.values() if decision == "exclude")
     manifest["updated"] = now
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
-    # Vide to_review.jsonl — cas traités
-    open(review_path, "w", encoding="utf-8").close()
+    # Reconstruit la file avec les cas sans décision humaine finale
+    with open(review_path, "w", encoding="utf-8") as f:
+        for case in remaining_cases:
+            f.write(json.dumps(case, ensure_ascii=False) + "\n")
 
-    print(f"✅ {len(entries)} décision(s) appliquée(s) : {included_manual} inclus, {excluded_manual} exclus.")
-    print("   to_review.jsonl vidé — screening terminé.")
+    print(f"✅ {len(entries)} nouvelle(s) décision(s) : {included_manual} inclus, {excluded_manual} exclus.")
+    print(f"   to_review.jsonl reconstruit — {len(remaining_cases)} cas restant(s).")
 
 
 def main(rid: str):
