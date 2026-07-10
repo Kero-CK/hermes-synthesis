@@ -132,9 +132,13 @@ Vérifier après chaque modification de l'une ou l'autre fonction.
 Chaque article screené génère une ligne dans `decisions.jsonl` :
 ```json
 {"ts":"...","doc":"10.xxx","stage":"screen_title_abstract","decision":"include",
- "score":0.87,"model":"flash@2026-04-24","prompt_hash":"sha256:...",
- "actor":"ai","reason":"Population et intervention correspondent aux critères"}
+ "score":0.87,"model":"<LLM_SCREENING_MODEL>","actor":"ai",
+ "reason":"Population et intervention correspondent aux critères","run":"..."}
 ```
+
+La température est fixée à `0.0`. Le journal conserve l'identifiant du modèle
+effectivement configuré, mais le fournisseur peut faire évoluer un alias : pour
+une reproductibilité stricte, configurer un identifiant de modèle versionné.
 
 Mise à jour :
 - `prisma.json` : `screened` = nombre total d'articles screenés

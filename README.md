@@ -88,7 +88,7 @@ Honest snapshot. This is build-in-public, not a product launch.
 | LLM screening / extraction / synthesis | ✅ Working (OpenAI-compatible endpoint; I use DeepSeek v4) |
 | PDF parsing (open-access + dropzone) | ✅ Working |
 | Audit log, PRISMA export, RIS export | ✅ Working |
-| Reproducibility (temperature 0, pinned model) | ✅ |
+| Reproducibility (temperature 0; versioned model ID recommended) | ✅ |
 | **Recall calibration against a hand-labelled gold set** | ⚠️ **Not yet done on a real domain** — see below |
 | Robustness hardening on all network/LLM steps | 🔨 In progress (search hardened; fulltext/screen/extract next) |
 | Multi-source retrieval (~20 databases via MCP) | ⬜ V2 |
