@@ -237,6 +237,14 @@ def log_decision(base: str, doi: str, decision: str, score: float, reason: str,
 def main(rid: str, threshold_include: float = 0.75,
          threshold_exclude: float = 0.25, use_mock: bool = False,
          force: bool = False):
+    if not (0.0 <= threshold_exclude < threshold_include <= 1.0):
+        print(
+            f"❌ Seuils invalides : exclude ({threshold_exclude}) doit être < include "
+            f"({threshold_include}), tous deux dans [0,1].",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     base = f"/reviews/{rid}"
     csv_path = f"{base}/candidates.csv"
     protocol_path = f"{base}/protocol.md"
