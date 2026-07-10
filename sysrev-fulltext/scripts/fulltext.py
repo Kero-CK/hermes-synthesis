@@ -370,7 +370,10 @@ def main(rid: str, use_mock: bool = False):
             else:
                 reason = "PDF non disponible (ni OA téléchargeable, ni dropzone)"
 
-        if content:
+        if content and len(content) <= 500:
+            reason = f"Parsing quasi-vide ({len(content)} caractères — PDF scanné ou slides ?)"
+
+        if content and len(content) > 500:
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(content)
             print(f"  ✅ {doi_safe}.md  ({len(content)} caractères)")
