@@ -69,6 +69,21 @@ def resolve_screening_decisions(entries: list[dict]) -> tuple[list[dict], int]:
     return [entry for entry in resolved if entry], unknown_entries
 
 
+def extract_research_question(protocol: str) -> str:
+    """Retourne la première ligne non vide de la section Question."""
+    in_question = False
+    for line in protocol.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## Question"):
+            in_question = True
+            continue
+        if in_question and stripped.startswith("##"):
+            break
+        if in_question and stripped:
+            return stripped
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Synthèse LLM (API compatible OpenAI)
 # ---------------------------------------------------------------------------
@@ -211,16 +226,6 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         var = row["variable"]
         val = row["valeur"]
         var_values.setdefault(var, []).append(val)
-
-    # Extraction de la question depuis protocol.md
-    question = ""
-    for line in protocol.split("\n"):
-        if "Question" in line and "##" in line:
-            continue
-        if question and line.startswith("##"):
-            break
-        if question or "## Question" in protocol:
-            pass  # simplifié pour le mock
 
     lines = [
         f"# Rapport de revue — {rid}",
@@ -480,15 +485,7 @@ def main(rid: str, use_mock: bool = False):
 
     review_mode = manifest.get("review_mode", "scoping")
 
-    # Extraction de la question depuis protocol.md
-    question = ""
-    for line in protocol.split("\n"):
-        if line.startswith("## Question") or "Question de recherche" in line:
-            continue
-        if question and line.startswith("##"):
-            break
-        if question or "## Question" in protocol:
-            question = line.strip() if not line.startswith("#") else ""
+    question = extract_research_question(protocol)
 
     print(f"📝 Génération du rapport pour {rid} ({review_mode})...")
 
