@@ -71,10 +71,12 @@ def pick_best(rows: list[dict]) -> dict:
 # Log d'audit
 # ---------------------------------------------------------------------------
 
-def log_decision(base: str, kept_doi: str, merged_dois: list[str], reason: str):
+def log_decision(base: str, kept_doi: str, merged_dois: list[str], reason: str,
+                 run_id: str):
     """Ajoute une ligne dans decisions.jsonl."""
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
+        "run": run_id,
         "doc": kept_doi,
         "stage": "dedup",
         "decision": "merge",
@@ -94,6 +96,7 @@ def main(rid: str, threshold: float = 0.90):
     base = f"/reviews/{rid}"
     csv_path = f"{base}/candidates.csv"
     raw_path = f"{base}/candidates_raw.csv"
+    run_id = datetime.now(timezone.utc).isoformat()
 
     if not os.path.exists(csv_path):
         print(f"❌ {csv_path} introuvable. Lance d'abord la skill search.", file=sys.stderr)
@@ -133,7 +136,7 @@ def main(rid: str, threshold: float = 0.90):
         if len(group) > 1:
             best = pick_best(group)
             merged_dois = [doi]
-            log_decision(base, doi, merged_dois, "DOI exact match")
+            log_decision(base, doi, merged_dois, "DOI exact match", run_id)
             # Supprime les doublons de rows
             for dup in group:
                 if dup is not best:
@@ -169,6 +172,7 @@ def main(rid: str, threshold: float = 0.90):
                         rows[j].get("doi", "sans-doi"),
                     ],
                     f"titre similaire (ratio={sim:.3f})",
+                    run_id,
                 )
                 src = worst.get("source", "?")
                 pass2_source_removed[src] = pass2_source_removed.get(src, 0) + 1

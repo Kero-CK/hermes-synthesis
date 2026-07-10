@@ -264,9 +264,10 @@ def mock_fulltext(doi: str) -> str | None:
 # Journalisation
 # ---------------------------------------------------------------------------
 
-def log_decision(base: str, doi: str, decision: str, reason: str):
+def log_decision(base: str, doi: str, decision: str, reason: str, run_id: str):
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
+        "run": run_id,
         "doc": doi,
         "stage": "fulltext",
         "decision": decision,
@@ -285,6 +286,7 @@ def main(rid: str, use_mock: bool = False):
     decisions_path = f"{base}/decisions.jsonl"
     csv_path = f"{base}/candidates.csv"
     sources_dir = f"{base}/sources"
+    run_id = datetime.now(timezone.utc).isoformat()
 
     if not os.path.exists(decisions_path):
         print(f"❌ {decisions_path} introuvable.", file=sys.stderr)
@@ -372,11 +374,11 @@ def main(rid: str, use_mock: bool = False):
             with open(md_path, "w", encoding="utf-8") as f:
                 f.write(content)
             print(f"  ✅ {doi_safe}.md  ({len(content)} caractères)")
-            log_decision(base, doi, "retrieved", reason)
+            log_decision(base, doi, "retrieved", reason, run_id)
             success += 1
         else:
             print(f"  ❌ {doi}  — {reason}")
-            log_decision(base, doi, "retrieval_failed", reason)
+            log_decision(base, doi, "retrieval_failed", reason, run_id)
             failed += 1
 
     # Mise à jour prisma.json

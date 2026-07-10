@@ -75,6 +75,7 @@ def apply_decisions(rid: str, decisions: dict):
 
         entries.append({
             "ts": now,
+            "run": now,
             "doc": case.get("doi", ""),
             "stage": "human_review",
             "decision": decision,

@@ -209,9 +209,10 @@ def decide(score: float, threshold_include: float, threshold_exclude: float) -> 
 # ---------------------------------------------------------------------------
 
 def log_decision(base: str, doi: str, decision: str, score: float, reason: str,
-                 model: str = "mock@test"):
+                 run_id: str, model: str = "mock@test"):
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
+        "run": run_id,
         "doc": doi,
         "stage": "screen_title_abstract",
         "decision": decision,
@@ -229,10 +230,23 @@ def log_decision(base: str, doi: str, decision: str, score: float, reason: str,
 # ---------------------------------------------------------------------------
 
 def main(rid: str, threshold_include: float = 0.75,
-         threshold_exclude: float = 0.25, use_mock: bool = False):
+         threshold_exclude: float = 0.25, use_mock: bool = False,
+         force: bool = False):
     base = f"/reviews/{rid}"
     csv_path = f"{base}/candidates.csv"
     protocol_path = f"{base}/protocol.md"
+    manifest_path = f"{base}/manifest.json"
+
+    manifest = json.load(open(manifest_path, encoding="utf-8"))
+    protected_stages = {"review_done", "fulltext_done", "extract_done", "report_done"}
+    if manifest.get("stage") in protected_stages and not force:
+        print(
+            '❌ Un re-screening écraserait les décisions humaines déjà appliquées. '
+            'Relance avec "force": true en connaissance de cause.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    run_id = datetime.now(timezone.utc).isoformat()
 
     if not os.path.exists(csv_path):
         print(f"❌ {csv_path} introuvable. Lance d'abord search puis dedup.", file=sys.stderr)
@@ -294,7 +308,7 @@ def main(rid: str, threshold_include: float = 0.75,
             api_errors += 1
         decision = decide(score, threshold_include, threshold_exclude)
 
-        log_decision(base, doi, decision, score, reason, model=model_used)
+        log_decision(base, doi, decision, score, reason, run_id, model=model_used)
         counts[decision] += 1
 
         if decision == "needs_manual":
@@ -330,8 +344,6 @@ def main(rid: str, threshold_include: float = 0.75,
         json.dump(prisma, f, indent=2, ensure_ascii=False)
 
     # Mise à jour manifest.json
-    manifest_path = f"{base}/manifest.json"
-    manifest = json.load(open(manifest_path, encoding="utf-8"))
     manifest["stage"] = "screen_done"
     manifest["screened_include"] = counts["include"]
     manifest["screened_exclude"] = counts["exclude"]
@@ -382,4 +394,5 @@ if __name__ == "__main__":
         threshold_include=float(payload.get("threshold_include", 0.75)),
         threshold_exclude=float(payload.get("threshold_exclude", 0.25)),
         use_mock=payload.get("mock", False),
+        force=payload.get("force", False),
     )

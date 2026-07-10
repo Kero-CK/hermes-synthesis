@@ -21,6 +21,54 @@ import sys
 from datetime import datetime, timezone
 
 
+KNOWN_JOURNAL_VOCABULARY = {
+    "dedup": {"merge"},
+    "screen_title_abstract": {"include", "exclude", "needs_manual"},
+    "human_review": {"include", "exclude"},
+    "screen_manual": {"include", "exclude"},  # alias historique
+    "fulltext": {"retrieved", "retrieval_failed", "include", "needs_manual"},
+    "extract": {"extracted", "not_found", "api_error", "include", "needs_manual"},
+}
+HUMAN_SCREEN_STAGES = {"human_review", "screen_manual"}
+
+
+def resolve_screening_decisions(entries: list[dict]) -> tuple[list[dict], int]:
+    """Résout une décision finale par DOI avec priorité aux décisions humaines."""
+    machine_decisions: dict[str, dict] = {}
+    human_decisions: dict[str, dict] = {}
+    order: list[str] = []
+    unknown_entries = 0
+
+    for line_number, entry in enumerate(entries, 1):
+        stage = entry.get("stage")
+        decision = entry.get("decision")
+        if decision not in KNOWN_JOURNAL_VOCABULARY.get(stage, set()):
+            unknown_entries += 1
+            print(
+                f"⚠️  Journal ligne {line_number} : tuple inconnu "
+                f"(stage={stage!r}, decision={decision!r})",
+                file=sys.stderr,
+            )
+            continue
+        if stage != "screen_title_abstract" and stage not in HUMAN_SCREEN_STAGES:
+            continue
+        if decision not in ("include", "exclude"):
+            continue
+        doc = entry.get("doc", "")
+        if not doc:
+            print(f"⚠️  Journal ligne {line_number} : décision de screening sans DOI", file=sys.stderr)
+            continue
+        if doc not in machine_decisions and doc not in human_decisions:
+            order.append(doc)
+        if stage in HUMAN_SCREEN_STAGES:
+            human_decisions[doc] = entry
+        else:
+            machine_decisions[doc] = entry
+
+    resolved = [human_decisions.get(doc, machine_decisions.get(doc)) for doc in order]
+    return [entry for entry in resolved if entry], unknown_entries
+
+
 # ---------------------------------------------------------------------------
 # Synthèse LLM (API compatible OpenAI)
 # ---------------------------------------------------------------------------
@@ -214,8 +262,7 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
             lines.append("")
 
     # --- Articles exclus ---
-    excluded = [d for d in decisions
-                if d.get("decision") == "exclude"]
+    excluded = [d for d in decisions if d.get("decision") == "exclude"]
     if excluded:
         lines.extend([
             "---",
@@ -386,6 +433,8 @@ def main(rid: str, use_mock: bool = False):
 
     with open(f"{base}/decisions.jsonl", encoding="utf-8") as f:
         decisions = [json.loads(line) for line in f if line.strip()]
+    screening_decisions, unknown_entries = resolve_screening_decisions(decisions)
+    manifest["journal_unknown_entries"] = unknown_entries
 
     # Chargement des candidats pour l'export RIS
     candidates = []
@@ -429,7 +478,7 @@ def main(rid: str, use_mock: bool = False):
             print("   ⚠️  Synthèse LLM non disponible — fallback basique")
 
     # Génération des fichiers
-    report_md = generate_report(rid, protocol, prisma, extractions, decisions,
+    report_md = generate_report(rid, protocol, prisma, extractions, screening_decisions,
                                 review_mode, candidates=candidates,
                                 to_review=to_review_list, synthesis=synthesis)
     prisma_md = generate_prisma_diagram(prisma)

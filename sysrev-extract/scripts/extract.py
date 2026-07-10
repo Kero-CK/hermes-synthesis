@@ -240,9 +240,11 @@ def mock_extract(fulltext: str, variable_name: str, variable_desc: str,
 # Journalisation
 # ---------------------------------------------------------------------------
 
-def log_decision(base: str, doi: str, variable: str, decision: str, reason: str):
+def log_decision(base: str, doi: str, variable: str, decision: str, reason: str,
+                 run_id: str):
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
+        "run": run_id,
         "doc": doi,
         "stage": "extract",
         "variable": variable,
@@ -262,6 +264,7 @@ def main(rid: str, use_mock: bool = False):
     sources_dir = f"{base}/sources"
     protocol_path = f"{base}/protocol.md"
     decisions_path = f"{base}/decisions.jsonl"
+    run_id = datetime.now(timezone.utc).isoformat()
 
     # Identifie les articles dont le fulltext a été récupéré.
     included_dois: list[str] = []
@@ -361,16 +364,16 @@ def main(rid: str, use_mock: bool = False):
             if valeur == "ERREUR API":
                 api_errors += 1
                 log_decision(base, doi, var["name"], "api_error",
-                             "Échec API LLM — variable non évaluée")
+                             "Échec API LLM — variable non évaluée", run_id)
                 print(f"  ❌ {doi_safe} / {var['name']} → ERREUR API")
             elif valeur == "NON TROUVÉ":
                 not_found += 1
                 log_decision(base, doi, var["name"], "not_found",
-                             f"Variable '{var['name']}' non trouvée dans le texte")
+                             f"Variable '{var['name']}' non trouvée dans le texte", run_id)
                 print(f"  ⚠️  {doi_safe} / {var['name']} → NON TROUVÉ")
             else:
                 log_decision(base, doi, var["name"], "extracted",
-                             f"Extraction réussie ({len(citation)} caractères)")
+                             f"Extraction réussie ({len(citation)} caractères)", run_id)
                 print(f"  ✅ {doi_safe} / {var['name']} → {valeur[:60]}")
 
     # Écriture extraction.csv
