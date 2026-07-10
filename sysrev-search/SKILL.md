@@ -34,12 +34,17 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
 
 2. **Formule la requête par source.** Pour chaque source à interroger,
    convertis la question + critères en une requête structurée utilisable
-   par l'API de la source. Pour OpenAlex :
-   - Opérateurs booléens : `AND`, `OR`, `NOT` (majuscules)
-   - Guillemets pour les phrases exactes : `"climate change"`
-   - Parenthèses obligatoires pour les groupes : `(A OR B) AND (C OR D)`
-   - **Pas de wildcards** (`*`, `?`) — OpenAlex ne les supporte pas → 400 Bad Request
-   - Filtres (années, langue, type) : via paramètres d'API, pas dans le search string
+   par l'API de la source. Pour OpenAlex, le script transmet la valeur au
+   paramètre API `filter=` : il faut donc utiliser la syntaxe structurée des
+   filtres, et non une chaîne booléenne libre.
+   - Virgules entre filtres = ET logique.
+   - Utiliser les champs `.search`, par exemple `title.search:` ou
+     `title_and_abstract.search:`.
+   - Ajouter les bornes avec des filtres dédiés, par exemple
+     `from_publication_date:2020-01-01`.
+   - Exemple : `title_and_abstract.search:climate adaptation,from_publication_date:2020-01-01`.
+   - Faire valider la syntaxe avec la documentation OpenAlex :
+     https://docs.openalex.org/api-entities/works/filter-works
 
 3. **Fais valider les requêtes par l'utilisateur via `clarify`.** Montre
    chaque requête formatée et demande confirmation. Tant que l'utilisateur
@@ -58,7 +63,7 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
    {
      "id": "adaptation-pme-2026",
      "queries": {
-       "openalex": "pme AND adaptation AND changement climatique",
+       "openalex": "title_and_abstract.search:SME climate adaptation,from_publication_date:2015-01-01",
        "crossref": "SME climate adaptation France"
      }
    }
@@ -102,14 +107,10 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
 
 # Pièges connus
 
-- **OpenAlex — pas de wildcards.** Les wildcards (`*`, `?`) causent une
-  erreur 400 Bad Request. Remplacer `quantif*` → `quantify`, `measur*` →
-  `measure`. Lister les variantes avec `OR` au lieu de tronquer.
-
-- **OpenAlex — parenthèses obligatoires pour les groupes booléens.**
-  Sans parenthèses, `A OR B AND C OR D` peut retourner des millions de
-  résultats (pas de priorité standard). Toujours grouper explicitement :
-  `(A OR B) AND (C OR D)`.
+- **OpenAlex — `filter=`, pas une requête booléenne libre.** Une chaîne telle
+  que `(A OR B) AND C` n'est pas le contrat consommé par `search.py`. Fournir
+  au moins un champ structuré contenant `:`, puis séparer les filtres par des
+  virgules. Le script rejette le texte libre avant tout appel réseau.
 
 - **Tester la requête avant le script.** En cas de doute, lancer un appel
   API direct (curl ou Python one-liner) pour vérifier le compte de résultats
