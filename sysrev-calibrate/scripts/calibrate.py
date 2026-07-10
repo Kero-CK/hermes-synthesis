@@ -238,7 +238,11 @@ def main(rid: str):
         sys.exit(1)
 
     # Métriques avec seuils par défaut
-    metrics = compute_metrics(y_true, y_pred_hard)
+    conservative_predictions = [
+        prediction if prediction != "needs_manual" else "exclude"
+        for prediction in y_pred_hard
+    ]
+    metrics = compute_metrics(y_true, conservative_predictions)
 
     # Menu de compromis
     menu = compute_threshold_menu(scores, y_true)
@@ -249,6 +253,7 @@ def main(rid: str):
         "n_errors": errors,
         "default_thresholds": {"include": 0.75, "exclude": 0.25},
         "default_metrics": metrics,
+        "note": "needs_manual compté comme exclude dans les métriques (convention conservatrice, identique au menu)",
         "threshold_menu": menu,
     }
 
@@ -256,11 +261,25 @@ def main(rid: str):
     with open(cal_path, "w", encoding="utf-8") as f:
         json.dump(calibration, f, indent=2, ensure_ascii=False)
 
+    manifest_path = f"{base}/manifest.json"
+    manifest = json.load(open(manifest_path, encoding="utf-8")) if os.path.exists(manifest_path) else {"id": rid}
+    manifest["stage"] = "calibrated"
+    manifest["calibration"] = {
+        "n_samples": len(scores),
+        "recall": metrics["recall"],
+        "precision": metrics["precision"],
+        "kappa": metrics["cohens_kappa"],
+    }
+    manifest["updated"] = datetime.now(timezone.utc).isoformat()
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+
     # Rapport — menu de compromis
     print(f"""
 📊 Calibration sur {len(scores)} articles du gold set :
 
    Par défaut (0.75/0.25) :
+     needs_manual compté comme exclude (convention conservatrice)
      Recall : {metrics['recall']:.1%}  |  Précision : {metrics['precision']:.1%}
      F1 : {metrics['f1']:.1%}  |  κ Cohen : {metrics['cohens_kappa']:.2f}
 """)
