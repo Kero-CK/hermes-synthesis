@@ -100,6 +100,9 @@ def apply_decisions(rid: str, decisions: dict):
     # Mise à jour prisma.json : included = inclus auto + inclus manuels
     prisma = json.load(open(prisma_path, encoding="utf-8")) if os.path.exists(prisma_path) else {}
     prisma["included"] = prisma.get("included", 0) + included_manual
+    prisma["needs_manual_pending"] = max(
+        0, prisma.get("needs_manual_pending", 0) - len(entries)
+    )
     with open(prisma_path, "w", encoding="utf-8") as f:
         json.dump(prisma, f, indent=2, ensure_ascii=False)
 

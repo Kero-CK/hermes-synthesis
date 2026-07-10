@@ -46,6 +46,15 @@ with open(f"{base}/decisions.jsonl", "a", encoding="utf-8") as f:
 with open(f"{base}/to_review.jsonl", "w", encoding="utf-8") as f:
     pass
 
+# Met à jour le compteur des cas restant à examiner
+with open(f"{base}/prisma.json", encoding="utf-8") as f:
+    prisma = json.load(f)
+prisma["needs_manual_pending"] = max(
+    0, prisma.get("needs_manual_pending", 0) - sum(counts.values())
+)
+with open(f"{base}/prisma.json", "w", encoding="utf-8") as f:
+    json.dump(prisma, f, indent=2, ensure_ascii=False)
+
 # Met à jour manifest.json
 with open(f"{base}/manifest.json", encoding="utf-8") as f:
     manifest = json.load(f)

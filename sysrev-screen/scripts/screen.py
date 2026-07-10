@@ -340,6 +340,7 @@ def main(rid: str, threshold_include: float = 0.75,
     # HITL includes on top of this — without this line, that add lands on
     # a base that was never set (stuck at whatever init_review.py wrote, i.e. 0).
     prisma["included"] = counts["include"]
+    prisma["needs_manual_pending"] = counts["needs_manual"]
     with open(prisma_path, "w", encoding="utf-8") as f:
         json.dump(prisma, f, indent=2, ensure_ascii=False)
 

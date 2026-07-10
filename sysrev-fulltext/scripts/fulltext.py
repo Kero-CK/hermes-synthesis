@@ -388,7 +388,8 @@ def main(rid: str, use_mock: bool = False):
     else:
         prisma = {}
     prisma["fulltext_assessed"] = success + failed
-    prisma["excluded_fulltext"] = failed
+    prisma["fulltext_not_retrieved"] = failed
+    prisma.pop("excluded_fulltext", None)
     # Count .md files actually produced in sources/, not just the success counter,
     # so prisma.json reflects what's really on disk.
     prisma["fulltext_retrieved"] = len(

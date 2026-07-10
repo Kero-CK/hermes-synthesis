@@ -190,6 +190,13 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
                     synthesis: str | None = None) -> str:
     """Génère un rapport de synthèse structuré. Intègre la synthèse LLM si fournie."""
 
+    included = prisma.get("included", 0)
+    fulltext_retrieved = prisma.get("fulltext_retrieved", 0)
+    fulltext_not_retrieved = max(0, prisma.get(
+        "fulltext_not_retrieved",
+        prisma.get("excluded_fulltext", included - fulltext_retrieved),
+    ))
+
     # Comptage des articles par variable
     var_values: dict[str, list[str]] = {}
     for row in extractions:
@@ -227,7 +234,7 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         f"| Screenés (titres + abstracts) | {prisma.get('screened', '?')} |",
         f"| **Inclus après screening** | **{prisma.get('included', '?')}** |",
         f"| Textes intégraux récupérés | {prisma.get('fulltext_retrieved', '?')} |",
-        f"| Non récupérés (limitation d'accès) | {prisma.get('included', 0) - prisma.get('fulltext_retrieved', 0)} |",
+        f"| Non récupérés (limitation d'accès) | {fulltext_not_retrieved} |",
         f"| **Extraits et synthétisés** | **{prisma.get('fulltext_retrieved', '?')}** |",
     ]
     lines.extend([
@@ -363,9 +370,18 @@ def generate_prisma_diagram(prisma: dict) -> str:
     after_dedup = prisma.get("after_dedup", 0)
     screened = prisma.get("screened", 0)
     fulltext = prisma.get("fulltext_assessed", 0)
-    excluded_ft = prisma.get("excluded_fulltext", 0)
     included = prisma.get("included", 0)
     fulltext_retrieved = prisma.get("fulltext_retrieved", fulltext)
+    pending = max(0, prisma.get("needs_manual_pending", 0))
+    excluded_screening = max(0, screened - included - pending)
+    fulltext_not_retrieved = max(0, prisma.get(
+        "fulltext_not_retrieved",
+        prisma.get("excluded_fulltext", included - fulltext_retrieved),
+    ))
+    pending_node = (
+        f'    C --> I["En attente (HITL)<br/>n = {pending}"]\n'
+        if pending > 0 else ""
+    )
 
     return f"""# Diagramme de flux PRISMA
 
@@ -373,10 +389,10 @@ def generate_prisma_diagram(prisma: dict) -> str:
 flowchart TD
     A["Articles identifiés<br/>n = {identified}"] --> B["Après déduplication<br/>n = {after_dedup}"]
     B --> C["Articles screenés<br/>(titres + abstracts)<br/>n = {screened}"]
-    C --> D["Exclus au screening<br/>n = {screened - included}"]
-    C --> E["**Inclus après screening**<br/>**n = {included}**"]
+    C --> D["Exclus au screening<br/>n = {excluded_screening}"]
+{pending_node}    C --> E["**Inclus après screening**<br/>**n = {included}**"]
     E --> F["Textes intégraux récupérés<br/>n = {fulltext_retrieved}"]
-    E --> H["Non récupérés<br/>(paywall / pas d'OA)<br/>n = {included - fulltext_retrieved}"]
+    E --> H["Non récupérés<br/>(paywall / pas d'OA)<br/>n = {fulltext_not_retrieved}"]
     F --> G["**Extraits et synthétisés**<br/>**n = {fulltext_retrieved}**"]
 
     style E fill:#4CAF50,color:#fff

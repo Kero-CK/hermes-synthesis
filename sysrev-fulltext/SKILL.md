@@ -11,7 +11,7 @@ inputs:
   - /reviews/<id>/manifest.json (stage = "screen_done" ou "review_done")
 outputs:
   - /reviews/<id>/sources/<doi_safe>.md (un fichier par article inclus)
-  - prisma.json ("fulltext_assessed", "excluded_fulltext") mis à jour
+  - prisma.json ("fulltext_assessed", "fulltext_not_retrieved") mis à jour
   - manifest.json mis à jour
 requires:
   env: []
@@ -82,7 +82,7 @@ En cas d'échec :
 ```
 
 Mise à jour :
-- `prisma.json` : `fulltext_assessed`, `excluded_fulltext`
+- `prisma.json` : `fulltext_assessed`, `fulltext_not_retrieved`
 - `manifest.json` : `stage = "fulltext_done"`
 
 # Pièges connus
