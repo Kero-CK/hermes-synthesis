@@ -162,7 +162,7 @@ Built on the shoulders of free, open tools that make a project like this possibl
 
 - **[Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research** — the orchestration layer, and the thing that started it all. I genuinely love working with it. Their work is extraordinary, and this project exists because of it.
 - **[DeepSeek](https://github.com/deepseek-ai)** — whose low, ever-dropping token pricing turned "I could maybe try this" into "I can experiment every single day."
-- **[OpenAlex](https://openalex.org)** — free scholarly metadata and citations, no key required.
+- **[OpenAlex](https://openalex.org)** — scholarly metadata and citations; an API key is required since February 2026.
 - **[Obsidian](https://obsidian.md)** — the open, beloved Markdown vault where the knowledge capitalizes.
 - **[GBrain](https://github.com/garrytan/gbrain)**, **[Docker](https://github.com/docker)**, and **[pymupdf4llm](https://github.com/pymupdf/pymupdf4llm)** — the rest of the backbone.
 

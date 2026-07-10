@@ -12,7 +12,7 @@ outputs:
   - /reviews/<id>/candidates.csv (avec provenance : source, requête, date)
   - mise à jour de prisma.json ("identified") et manifest.json
 requires:
-  env: [UNPAYWALL_EMAIL]
+  env: [OPENALEX_API_KEY, UNPAYWALL_EMAIL]
   tools: [clarify, terminal]
   scripts: [scripts/search.py]
 ---
@@ -27,6 +27,8 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
 
 - `manifest.json` indique `stage = "protocol_done"`
 - `protocol.md` existe avec une question et des critères
+- `OPENALEX_API_KEY` est configurée ; une recherche réelle échoue explicitement
+  si la clé est absente ou refusée
 
 # Procédure
 
