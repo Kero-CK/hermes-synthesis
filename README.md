@@ -66,7 +66,7 @@ The whole thing is orchestrated by a single agent that changes hats at each step
 
 These are the non-negotiables. They're what separates an *instrument* from a toy.
 
-- **The state lives in files.** Each review is a folder (`/reviews/<id>/`). No database, no hidden state. A `manifest.json` tracks progress, a `prisma.json` holds the counters, and a `decisions.jsonl` is the audit log — one line per decision, with model, timestamp, and reason. The PRISMA diagram is generated *from* that log, so it's always correct.
+- **The state lives in files.** Each review is a folder (`/reviews/<id>/`). No database, no hidden state. A `manifest.json` tracks progress, a `prisma.json` holds the counters, and a `decisions.jsonl` is the audit log — one line per decision, with model, timestamp, and reason. Pipeline stages update `prisma.json`; the journal remains the auditable decision history and is used to resolve screening state. The report renders the stored counters and signals unknown journal vocabulary instead of silently ignoring it.
 - **Auditable by construction.** Every decision is a logged line. Every extraction cell traces to a verbatim quote. Every query is reproducible.
 - **Recall-first screening.** In a review, the cardinal sin isn't imprecision — it's *missing* a relevant study. When in doubt, the tool includes or asks the human, rather than excluding.
 - **Anti-hallucination extraction.** Two passes: first extract only verbatim quotes (or mark `NOT FOUND`), then synthesize *only* from those quotes. No invented values.
