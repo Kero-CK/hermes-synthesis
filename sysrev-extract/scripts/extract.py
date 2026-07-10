@@ -115,7 +115,7 @@ def llm_extract(fulltext: str, variable_name: str, variable_desc: str,
                 doi: str = "") -> dict:
     """
     Double passe d'extraction via LLM.
-    Fallback automatique vers NON TROUVÉ si l'API n'est pas configurée.
+    Retourne ERREUR API si l'API n'est pas configurée ou échoue.
     Le paramètre doi est ignoré (présent pour compatibilité d'interface avec mock_extract).
     
     Le texte intégral est envoyé EN ENTIER au LLM. Les modèles modernes
@@ -140,8 +140,7 @@ def llm_extract(fulltext: str, variable_name: str, variable_desc: str,
             "section": result.get("section", ""),
         }
 
-    # Fallback
-    return {"valeur": "NON TROUVÉ", "citation": "LLM non disponible", "section": ""}
+    return {"valeur": "ERREUR API", "citation": "", "section": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +291,7 @@ def main(rid: str, use_mock: bool = False):
 
     rows: list[dict] = []
     not_found = 0
+    api_errors = 0
     total = 0
 
     for doi in included_dois:
@@ -321,7 +321,12 @@ def main(rid: str, use_mock: bool = False):
                 "section": section,
             })
 
-            if valeur == "NON TROUVÉ":
+            if valeur == "ERREUR API":
+                api_errors += 1
+                log_decision(base, doi, var["name"], "api_error",
+                             "Échec API LLM — variable non évaluée")
+                print(f"  ❌ {doi_safe} / {var['name']} → ERREUR API")
+            elif valeur == "NON TROUVÉ":
                 not_found += 1
                 log_decision(base, doi, var["name"], "needs_manual",
                              f"Variable '{var['name']}' non trouvée dans le texte")
@@ -345,16 +350,26 @@ def main(rid: str, use_mock: bool = False):
     manifest["stage"] = "extract_done"
     manifest["extraction_total"] = total
     manifest["extraction_not_found"] = not_found
+    manifest["extraction_api_errors"] = api_errors
     manifest["updated"] = datetime.now(timezone.utc).isoformat()
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     # Résumé
     print(f"\n📊 Résultat extraction :")
-    print(f"   ✅ Extraites    : {total - not_found}")
+    print(f"   ✅ Extraites    : {total - not_found - api_errors}")
     print(f"   ⚠️  NON TROUVÉ  : {not_found}")
+    print(f"   ❌ Erreurs API : {api_errors}")
     print(f"   📋 Total        : {total} cellules")
     print(f"   📁 Fichier      : {csv_path}")
+    if api_errors:
+        print(
+            f"\n❌ Extraction incomplète : {api_errors} variable(s) non évaluée(s) "
+            "à cause d'erreurs API.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     print(f"\n✅ Extraction terminée")
 
 

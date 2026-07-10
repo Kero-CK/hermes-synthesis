@@ -104,14 +104,18 @@ def llm_synthesize(context: dict) -> str:
 
     summary_lines = []
     for var, values in var_values.items():
-        found = [v for v in values if v != "NON TROUVÉ"]
-        nf = len(values) - len(found)
+        found = [v for v in values if v not in ("NON TROUVÉ", "ERREUR API")]
+        nf = sum(1 for v in values if v == "NON TROUVÉ")
+        api_errors = sum(1 for v in values if v == "ERREUR API")
         summary_lines.append(f"\n### {var}")
-        summary_lines.append(f"Found: {len(found)}/{len(values)} articles")
+        evaluated = len(values) - api_errors
+        summary_lines.append(f"Found: {len(found)}/{evaluated} evaluated articles")
         if found:
             summary_lines.append(f"Values: {', '.join(found[:10])}")
         if nf > 0:
             summary_lines.append(f"NON TROUVÉ in {nf} articles")
+        if api_errors > 0:
+            summary_lines.append(f"API errors: {api_errors} unevaluated articles (excluded from evidence)")
 
     prompt = REPORT_PROMPT.format(
         review_mode=context.get("review_mode", "scoping"),
@@ -194,13 +198,16 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         for var, values in var_values.items():
             lines.append(f"#### {var}")
             lines.append("")
-            found = [v for v in values if v != "NON TROUVÉ"]
+            found = [v for v in values if v not in ("NON TROUVÉ", "ERREUR API")]
             if found:
                 for v in found:
                     lines.append(f"- {v}")
-            nf = len(values) - len(found)
+            nf = sum(1 for v in values if v == "NON TROUVÉ")
             if nf > 0:
                 lines.append(f"- ⚠️ NON TROUVÉ dans {nf} article(s)")
+            api_errors = sum(1 for v in values if v == "ERREUR API")
+            if api_errors > 0:
+                lines.append(f"- ❌ ERREUR API dans {api_errors} article(s) non évalué(s)")
             lines.append("")
         if not var_values:
             lines.append("*(aucune donnée extraite)*")
@@ -261,8 +268,9 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         "Le tableau complet est dans [`extraction.csv`](extraction.csv).",
         "",
         f"**Total cellules :** {len(extractions)}",
-        f"**Valeurs extraites :** {sum(1 for e in extractions if e['valeur'] != 'NON TROUVÉ')}",
+        f"**Valeurs extraites :** {sum(1 for e in extractions if e['valeur'] not in ('NON TROUVÉ', 'ERREUR API'))}",
         f"**Non trouvées :** {sum(1 for e in extractions if e['valeur'] == 'NON TROUVÉ')}",
+        f"**Erreurs API (non évaluées) :** {sum(1 for e in extractions if e['valeur'] == 'ERREUR API')}",
     ])
 
     # Déterminer les modèles utilisés (réels ou fallback)
