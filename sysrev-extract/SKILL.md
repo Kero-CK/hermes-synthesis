@@ -92,6 +92,11 @@ cellule sont : valeur extraite, `NON TROUVÉ`, `ERREUR API` et
 restent reconnus en lecture comme alias de `extracted` et `not_found`. Tout tuple
 inconnu est signalé et compté dans `manifest["journal_unknown_entries"]`.
 
+Limite connue : la normalisation supprime les césures explicites en fin de ligne
+(`inter-\nvention` → `intervention`). Une citation reproduisant la forme césurée
+sur une seule ligne (`inter- vention`) sera rejetée. Aucune telle césure n'était
+présente dans les neuf sources réelles du corpus de régression au 2026-07-10.
+
 Mise à jour :
 - `manifest.json` : `stage = "extract_done"`, `extraction_total`, `extraction_not_found`
 

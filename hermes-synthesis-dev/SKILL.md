@@ -56,6 +56,10 @@ Abstract: ...
 
 **Ne pas faire** : intercaler des éléments variables dans la partie fixe (casse le cache), ou placer le document avant les instructions (risque d'injection).
 
+**Dette n°15** : appliquer cette séparation system/user, l'échappement des
+délimiteurs et le clamp des scores à `calibrate.py` lorsque le chantier de
+calibration sera débloqué. `calibrate.py` reste volontairement inchangé avant cela.
+
 ---
 
 ## Règle n°3 : Mock explicite et erreurs API visibles

@@ -79,12 +79,6 @@ You must perform two sequential steps:
 **Name:** {variable_name}
 **Description:** {variable_description}
 
-## ARTICLE TEXT (FULL — read entirely, do not skip sections)
-
-<DOCUMENT>
-{fulltext}
-</DOCUMENT>
-
 ## OUTPUT FORMAT
 
 Return ONLY a valid JSON object (no markdown, no code fences):
@@ -104,7 +98,12 @@ Ask yourself: "Is the citation field an EXACT copy of a sentence from the docume
 If the answer is no, return NON TROUVÉ. A paraphrased citation is worse than no citation."""
 
 
-def _call_llm_extract(prompt: str) -> dict | None:
+def sanitize_document(text: str) -> str:
+    """Neutralise les délimiteurs pouvant provenir du document."""
+    return text.replace("<DOCUMENT>", "<DOC>").replace("</DOCUMENT>", "</DOC>")
+
+
+def _call_llm_extract(prompt: str, user_message: str) -> dict | None:
     """Appelle l'API LLM pour l'extraction. Retourne le JSON parsé ou None."""
     import urllib.request
     import urllib.error
@@ -121,7 +120,7 @@ def _call_llm_extract(prompt: str) -> dict | None:
         "model": model,
         "messages": [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": "Extract the variable."}
+            {"role": "user", "content": user_message}
         ],
         "temperature": 0.0,
         "max_tokens": 400,
@@ -159,10 +158,10 @@ def llm_extract(fulltext: str, variable_name: str, variable_desc: str,
     prompt = EXTRACTION_PROMPT.format(
         variable_name=variable_name,
         variable_description=variable_desc,
-        fulltext=fulltext,
     )
+    user_message = f"<DOCUMENT>\n{sanitize_document(fulltext)}\n</DOCUMENT>"
 
-    result = _call_llm_extract(prompt)
+    result = _call_llm_extract(prompt, user_message)
 
     if result and "valeur" in result:
         return {

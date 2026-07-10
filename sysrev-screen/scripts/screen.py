@@ -62,16 +62,16 @@ Scoring guidelines:
 - score <= 0.25 → clearly violates inclusion criteria or triggers exclusion criteria
 - 0.25 < score < 0.75 → ambiguous, requires human review
 
-## ARTICLE TO EVALUATE
+"""
 
-<DOCUMENT>
-Title: {title}
-Abstract: {abstract}
-</DOCUMENT>"""
+
+def sanitize_document(text: str) -> str:
+    """Neutralise les délimiteurs pouvant provenir du document."""
+    return text.replace("<DOCUMENT>", "<DOC>").replace("</DOCUMENT>", "</DOC>")
 
 
 def _call_llm_api(system_prompt: str, user_message: str = "",
-                  temperature: float = 0.0, max_tokens: int = 300) -> dict | None:
+                  max_tokens: int = 300) -> dict | None:
     """
     Appelle une API compatible OpenAI pour le screening.
 
@@ -100,7 +100,7 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message or "Evaluate the article."}
         ],
-        "temperature": temperature,
+        "temperature": 0.0,
         "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
     }).encode("utf-8")
@@ -138,16 +138,21 @@ def llm_screen(title: str, abstract: str, doi: str,
     prompt = SCREENING_SYSTEM_PROMPT.format(
         include_criteria=inc_text,
         exclude_criteria=exc_text,
-        title=title,
-        abstract=abstract or "(pas d'abstract disponible)",
+    )
+    abstract_text = abstract or "(pas d'abstract disponible)"
+    user_message = (
+        "<DOCUMENT>\n"
+        f"Title: {sanitize_document(title)}\n"
+        f"Abstract: {sanitize_document(abstract_text)}\n"
+        "</DOCUMENT>"
     )
 
-    result = _call_llm_api(prompt)
+    result = _call_llm_api(prompt, user_message=user_message)
 
     if result and "score" in result:
         # Retour formaté comme attendu par le reste du script
         return {
-            "score": float(result.get("score", 0.5)),
+            "score": max(0.0, min(1.0, float(result.get("score", 0.5)))),
             "reason": result.get("reason", "évaluation LLM"),
             "model": os.environ.get("LLM_SCREENING_MODEL", "deepseek-chat"),
         }
