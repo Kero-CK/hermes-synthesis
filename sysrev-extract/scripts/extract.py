@@ -265,6 +265,7 @@ def main(rid: str, use_mock: bool = False):
 
     # Identifie les articles dont le fulltext a été récupéré.
     included_dois: list[str] = []
+    seen: set[str] = set()
     unknown_entries = 0
     with open(decisions_path, encoding="utf-8") as f:
         for line_number, line in enumerate(f, 1):
@@ -280,7 +281,10 @@ def main(rid: str, use_mock: bool = False):
                 )
                 continue
             if entry.get("stage") == "fulltext" and entry.get("decision") in ("retrieved", "include"):
-                included_dois.append(entry["doc"])
+                doc = entry.get("doc", "")
+                if doc and doc not in seen:
+                    included_dois.append(doc)
+                    seen.add(doc)
 
     manifest_path = f"{base}/manifest.json"
     manifest = json.load(open(manifest_path, encoding="utf-8"))
