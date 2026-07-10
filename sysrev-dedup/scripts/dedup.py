@@ -139,7 +139,12 @@ def main(rid: str, threshold: float = 0.90):
         if len(group) > 1:
             best = pick_best(group)
             merged_dois = [doi]
-            log_decision(base, doi, merged_dois, "DOI exact match", run_id)
+            sources = sorted({row.get("source", "?") or "?" for row in group})
+            reason = (
+                f"DOI exact match — {len(group)} copies fusionnées "
+                f"(sources: {', '.join(sources)})"
+            )
+            log_decision(base, doi, merged_dois, reason, run_id)
             # Supprime les doublons de rows
             for dup in group:
                 if dup is not best:

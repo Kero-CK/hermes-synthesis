@@ -146,7 +146,8 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
   `UNPAYWALL_EMAIL` depuis l'environnement pour le header `User-Agent`
   (`mailto:`). Sans cette variable, fallback sur `hermes-synthesis@example.org`
   — le pool courtois standard est moins prioritaire. Configurer
-  `UNPAYWALL_EMAIL` améliore le rate-limit (10 req/s → ~30 req/s).
+  `UNPAYWALL_EMAIL` identifie poliment le client ; ne pas promettre un débit
+  précis, les limites OpenAlex peuvent évoluer.
 
 - **HTTP 429/5xx — retry avec backoff exponentiel, JAMAIS sauter une page.**
   Sur un 429 (rate limit), 502, 503, ou 504 (erreur serveur temporaire),

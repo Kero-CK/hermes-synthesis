@@ -42,10 +42,10 @@ dédupliqué propre et tracer toutes les fusions pour l'audit.
    ```json
    {
      "id": "adaptation-pme-2026",
-     "threshold": 0.85
+     "threshold": 0.90
    }
    ```
-   - `threshold` : seuil de similarité titre (0.0–1.0). Défaut : 0.85.
+   - `threshold` : seuil de similarité titre (0.0–1.0). Défaut : 0.90.
      Plus bas = plus agressif (fusionne des titres moins ressemblants).
 
 3. Le script :
@@ -106,7 +106,8 @@ dédupliqué propre et tracer toutes les fusions pour l'audit.
 Chaque fusion génère une ligne dans `decisions.jsonl` :
 ```json
 {"ts":"...","doc":"DOI_gardé","stage":"dedup","decision":"merge",
- "merged_dois":["10.xxx/a","10.xxx/b"],"reason":"DOI exact match"}
+ "merged_dois":["10.xxx/a"],
+ "reason":"DOI exact match — 2 copies fusionnées (sources: openalex, manual)"}
 ```
 
 Mise à jour :
