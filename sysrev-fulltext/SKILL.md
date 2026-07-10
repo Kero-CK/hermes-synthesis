@@ -115,6 +115,11 @@ Mise à jour :
   `candidates.csv` (pas d'OA URL, pas de dropzone) → l'article est
   silencieusement ignoré. Remonter au skill `sysrev-review` pour corriger
   les DOIs (pitfall « DOIs fantômes après reconstruction »).
+- **DOI vide — asymétrie volontaire des lecteurs.** Le lecteur de screening
+  signale une entrée de décision sans `doc` puis l'ignore. Les consommateurs
+  fulltext/extract ignorent silencieusement un `doc` vide : il ne peut être
+  relié ni à `candidates.csv` ni à un fichier source. Cette structure ne doit
+  pas être produite par le chemin canonique `review.py`.
 
 # Critère de fin (Definition of Done)
 

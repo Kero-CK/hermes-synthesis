@@ -142,8 +142,10 @@ Les volumes (`./data`, `/vault`) persistent. Seul le conteneur hermes est recré
 Quand une review humaine (`sysrev-review`) est faite entre le screening et le fulltext,
 les articles inclus par l'humain ont le stage `human_review` dans `decisions.jsonl`.
 Le script `fulltext.py` DOIT accepter ces décisions, pas seulement celles du stage
-`screen_title_abstract`. La version corrigée du script lit TOUS les articles avec
-`decision == "include"` quel que soit leur stage.
+`screen_title_abstract`. La résolution est limitée au vocabulaire de screening
+connu : `screen_title_abstract`, `human_review` et l'alias `screen_manual`.
+La dernière décision humaine par DOI prévaut sur toute décision machine ; un
+tuple stage/décision inconnu est signalé et compté, jamais traité comme inclusion.
 
 Si le fulltext est lancé et ne trouve pas les articles inclus manuellement,
 vérifier que `fulltext.py` n'a pas un filtre `stage == "screen_title_abstract"`.

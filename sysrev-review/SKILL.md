@@ -76,9 +76,13 @@ avec l'IA.
    ("inclue tous sauf ceux du groupe 3", "exclue 6,8,10,12"). Dans ce cas,
    interpréter et appliquer sur tous les cas.
 
-4. Le chercheur répond avec sa liste. Applique chaque décision :
-   - Pour `include` → journalise `{"decision": "include", "actor": "human"}`
-   - Pour `exclude` → journalise `{"decision": "exclude", "actor": "human"}`
+4. Le chercheur répond avec sa liste. Applique les décisions par le chemin
+   exécutable principal de `review.py` :
+   ```
+   python3 ~/.hermes/skills/sysrev/sysrev-review/scripts/review.py \
+     '{"id":"ma-revue","decisions":{"10.xxx/a":"include","10.xxx/b":"exclude"}}'
+   ```
+   Les clés sont les DOI affichés et chaque valeur est `include` ou `exclude`.
 
 5. Mets à jour `to_review.jsonl` (retire les cas traités) et `manifest.json`.
 
@@ -95,16 +99,16 @@ Chaque décision humaine → `decisions.jsonl` avec `"actor": "human"`.
 
 # Pièges connus
 
-- **Le script `review.py` ne fait QUE formater.** Il affiche la liste mais
-  n'applique PAS les décisions. Après que le chercheur a répondu, l'agent
-  doit appliquer les décisions manuellement :
-  - Journaliser chaque décision dans `decisions.jsonl` avec `"actor": "human"`
-  - Vider `to_review.jsonl`
-  - Mettre à jour `manifest.json` (stage → `review_done`, compteurs)
-  Voir `references/apply_decisions.py` pour le snippet réutilisable.
-- **Stage filter côté fulltext.** Si la review humaine est faite AVANT le
-  fulltext, s'assurer que `fulltext.py` accepte aussi les décisions du stage
-  `human_review` (voir pitfall dans `sysrev-fulltext`).
+- **Chemin d'application canonique.** `scripts/review.py` avec une clé
+  `decisions` journalise les décisions `human_review`, reconstruit
+  `to_review.jsonl` avec exactement les cas encore en attente et recalcule
+  l'état résolu. `references/apply_decisions.py` est un ancien exemple
+  exécutable conservé comme référence de secours ; il ne constitue pas le
+  chemin supporté et ne remplace pas toutes les mises à jour du script principal.
+- **Sémantique des compteurs manuels.** `manifest.manual_included` et
+  `manifest.manual_excluded` sont les totaux de l'état humain final courant
+  (dernière décision humaine par DOI), pas des compteurs cumulatifs d'événements.
+  Une correction humaine ultérieure déplace donc le DOI d'un total à l'autre.
 
 - **DOIs fantômes après reconstruction de `to_review.jsonl`.** Quand
   `to_review.jsonl` est vidé par une première application buggée puis
@@ -130,7 +134,7 @@ Chaque décision humaine → `decisions.jsonl` avec `"actor": "human"`.
 # Critère de fin
 
 - Toutes les décisions sont journalisées
-- `to_review.jsonl` est vidé
+- `to_review.jsonl` contient exactement les cas encore sans décision humaine
 - `manifest.json` indique `stage = "review_done"`
 - **Tous les DOIs des décisions humaines sont non-vides.** Après application,
   vérifier avec `sum(1 for e in decisions if not e.get('doc')) == 0`.

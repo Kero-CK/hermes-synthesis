@@ -100,14 +100,10 @@ Sans ces variables, le script bascule automatiquement en mode mock
   `python3 -c "import py_compile; py_compile.compile(...)"` après avoir modifié
   le script — un patch mal appliqué peut créer des doublons de déclaration
   ou des indentations cassées.
-- **Décisions humaines invisibles pour le fulltext** : le script de screening
-  journalise les décisions avec `stage = "screen_title_abstract"`. Mais après
-  la review humaine (`sysrev-review`), les décisions humaines sont journalisées
-  avec `stage = "human_review"`. Résultat : `fulltext.py` ne voit QUE les
-  inclusions auto et rate toutes les inclusions humaines. **Solution** : soit
-  patcher `fulltext.py` pour accepter les 2 stages, soit faire en sorte que
-  `screen.py` re-journalise les décisions humaines sous le stage
-  `screen_title_abstract` après la review.
+- **Résolution après review humaine.** Les lecteurs reconnaissent
+  `human_review` et son alias historique `screen_manual`. La dernière décision
+  humaine par DOI prévaut toujours sur les décisions machine, même si un
+  re-screening plus récent a été forcé.
 
 ## ⚠️ Pitfall : signatures mock_screen / llm_screen
 
@@ -120,12 +116,12 @@ Vérifier après chaque modification de l'une ou l'autre fonction.
 
 # Pièges courants
 
-- **Mode réel sans LLM configuré.** Le script appelle l'API LLM uniquement si
-  `LLM_API_ENDPOINT`, `LLM_API_KEY` et `LLM_SCREENING_MODEL` sont définis dans
-  l'environnement. Sans ces variables, il bascule automatiquement sur le mode
-  mock (scores simulés) — ce qui donne des résultats fictifs, pas une vraie
-  évaluation. Avant de lancer en mode réel, toujours vérifier que ces 3
-  variables sont exportées, ou proposer à l'utilisateur de les configurer.
+- **Mode réel sans LLM configuré.** `LLM_API_ENDPOINT`, `LLM_API_KEY` et
+  `LLM_SCREENING_MODEL` sont obligatoires. Une configuration absente ou un
+  appel en échec produit une erreur technique visible et une sortie non nulle ;
+  le mode fictif n'est autorisé qu'avec `"mock": true` explicite.
+  Avant de lancer en mode réel, toujours vérifier que ces trois variables sont
+  exportées, ou proposer à l'utilisateur de les configurer.
 
 # Journalisation
 

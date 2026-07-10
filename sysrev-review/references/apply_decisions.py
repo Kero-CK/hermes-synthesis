@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""Snippet pour appliquer les décisions batch de la review humaine.
-À adapter : changer `decisions` avec la liste réelle, et `base` si besoin."""
+"""Ancien exemple exécutable pour appliquer des décisions batch.
+
+Référence de secours uniquement : le chemin supporté est désormais le mode
+``decisions`` de ``scripts/review.py``, qui reconstruit aussi l'état résolu et
+ses compteurs. Ne pas utiliser ce fichier comme procédure principale.
+"""
 
 import json, os
 from datetime import datetime, timezone
