@@ -58,22 +58,23 @@ Abstract: ...
 
 ---
 
-## Règle n°3 : Fallback automatique
+## Règle n°3 : Mock explicite et erreurs API visibles
 
-Toute fonction `llm_*()` DOIT avoir un fallback automatique vers `mock_*()` si l'API n'est pas configurée.
+Le mode mock est autorisé uniquement quand l'appelant le demande explicitement avec `"mock": true`. En mode réel, une API non configurée ou en échec ne DOIT jamais produire de données mock.
 
 ```python
 def llm_screen(...):
-    if not os.environ.get("LLM_API_KEY"):
-        return mock_screen(...)  # fallback silencieux
-    try:
-        result = _call_llm_api(...)
-        return {"score": ..., "model": "deepseek-chat"}
-    except Exception:
-        return mock_screen(...)  # fallback sur erreur
+    result = _call_llm_api(...)
+    if result is None:
+        return {
+            "score": 0.5,
+            "reason": "api_error: LLM indisponible — non évalué",
+            "model": "none (api_error)",
+        }
+    return {"score": ..., "model": "deepseek-chat"}
 ```
 
-**Pourquoi** : le pipeline ne doit jamais planter parce que l'API est down ou non configurée. L'utilisateur voit des résultats mock (avec un message d'avertissement) plutôt qu'une traceback.
+**Pourquoi** : des valeurs simulées dans un run réel rendent l'audit non reproductible. Le batch traite les autres articles, envoie les échecs en revue manuelle, les compte dans le manifest, affiche un résumé visible et termine avec un code non nul.
 
 ---
 

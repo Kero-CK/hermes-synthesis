@@ -91,7 +91,6 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
 
     if not endpoint or not api_key:
         print("  ⚠️  LLM non configuré : définis LLM_API_ENDPOINT et LLM_API_KEY.", file=sys.stderr)
-        print("     Basculé sur le mode mock.", file=sys.stderr)
         return None
 
     url = f"{endpoint.rstrip('/')}/chat/completions"
@@ -129,8 +128,8 @@ def llm_screen(title: str, abstract: str, doi: str,
                criteria_exclude: list[str]) -> dict:
     """
     Évalue un article contre les critères via le LLM.
-    Fallback : si l'API LLM n'est pas configurée ou échoue, bascule
-    automatiquement sur le mode mock (scores simulés).
+    Si l'API LLM n'est pas configurée ou échoue, envoie l'article en
+    revue manuelle sans produire de score simulé.
     """
     # Formatage des critères pour le prompt
     inc_text = "\n".join(f"- {c}" for c in criteria_include) if criteria_include else "- (aucun)"
@@ -153,11 +152,12 @@ def llm_screen(title: str, abstract: str, doi: str,
             "model": os.environ.get("LLM_SCREENING_MODEL", "deepseek-chat"),
         }
 
-    # Fallback mock
-    print(f"  ⚠️  LLM indisponible — bascule mock pour cet article", file=sys.stderr)
-    result = mock_screen(title, abstract, doi, criteria_include, criteria_exclude)
-    result["model"] = "mock (fallback)"
-    return result
+    print("  ⚠️  LLM indisponible — article envoyé en revue manuelle", file=sys.stderr)
+    return {
+        "score": 0.5,
+        "reason": "api_error: LLM indisponible — non évalué, envoyé en revue humaine",
+        "model": "none (api_error)",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +274,7 @@ def main(rid: str, threshold_include: float = 0.75,
 
     # Compteurs
     counts = {"include": 0, "exclude": 0, "needs_manual": 0}
+    api_errors = 0
     to_review: list[dict] = []
 
     print(f"🔍 Screening de {len(candidates)} articles...")
@@ -289,6 +290,8 @@ def main(rid: str, threshold_include: float = 0.75,
         score = result["score"]
         reason = result["reason"]
         model_used = result.get("model", "unknown")
+        if model_used == "none (api_error)":
+            api_errors += 1
         decision = decide(score, threshold_include, threshold_exclude)
 
         log_decision(base, doi, decision, score, reason, model=model_used)
@@ -333,6 +336,7 @@ def main(rid: str, threshold_include: float = 0.75,
     manifest["screened_include"] = counts["include"]
     manifest["screened_exclude"] = counts["exclude"]
     manifest["screened_manual"] = counts["needs_manual"]
+    manifest["screen_api_errors"] = api_errors
     manifest["updated"] = datetime.now(timezone.utc).isoformat()
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
@@ -346,6 +350,14 @@ def main(rid: str, threshold_include: float = 0.75,
     if to_review:
         print(f"\n⚠️  {len(to_review)} cas ambigus → {review_path}")
         print(f"   Utilise la skill sysrev-review pour les traiter.")
+    if api_errors:
+        print(
+            f"\n❌ Screening incomplet : {api_errors} article(s) non évalué(s) "
+            "à cause d'erreurs API — envoyé(s) en revue manuelle.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     print(f"\n✅ Screening terminé")
 
 
