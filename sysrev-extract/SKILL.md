@@ -85,7 +85,10 @@ doi,variable,valeur,citation,section
 ```
 
 Les échecs documentaires utilisent `not_found` et les échecs techniques
-`api_error`. Les anciens tuples `extract/include` et `extract/needs_manual`
+`api_error`. Une citation absente du texte source normalisé produit
+`rejected_citation` et la valeur CSV `CITATION REJETÉE`. Les quatre états de
+cellule sont : valeur extraite, `NON TROUVÉ`, `ERREUR API` et
+`CITATION REJETÉE`. Les anciens tuples `extract/include` et `extract/needs_manual`
 restent reconnus en lecture comme alias de `extracted` et `not_found`. Tout tuple
 inconnu est signalé et compté dans `manifest["journal_unknown_entries"]`.
 

@@ -27,7 +27,7 @@ KNOWN_JOURNAL_VOCABULARY = {
     "human_review": {"include", "exclude"},
     "screen_manual": {"include", "exclude"},  # alias historique
     "fulltext": {"retrieved", "retrieval_failed", "include", "needs_manual"},
-    "extract": {"extracted", "not_found", "api_error", "include", "needs_manual"},
+    "extract": {"extracted", "not_found", "api_error", "rejected_citation", "include", "needs_manual"},
 }
 HUMAN_SCREEN_STAGES = {"human_review", "screen_manual"}
 
@@ -152,11 +152,12 @@ def llm_synthesize(context: dict) -> str:
 
     summary_lines = []
     for var, values in var_values.items():
-        found = [v for v in values if v not in ("NON TROUVÉ", "ERREUR API")]
+        found = [v for v in values if v not in ("NON TROUVÉ", "ERREUR API", "CITATION REJETÉE")]
         nf = sum(1 for v in values if v == "NON TROUVÉ")
         api_errors = sum(1 for v in values if v == "ERREUR API")
+        rejected_citations = sum(1 for v in values if v == "CITATION REJETÉE")
         summary_lines.append(f"\n### {var}")
-        evaluated = len(values) - api_errors
+        evaluated = len(values) - api_errors - rejected_citations
         summary_lines.append(f"Found: {len(found)}/{evaluated} evaluated articles")
         if found:
             summary_lines.append(f"Values: {', '.join(found[:10])}")
@@ -164,6 +165,8 @@ def llm_synthesize(context: dict) -> str:
             summary_lines.append(f"NON TROUVÉ in {nf} articles")
         if api_errors > 0:
             summary_lines.append(f"API errors: {api_errors} unevaluated articles (excluded from evidence)")
+        if rejected_citations > 0:
+            summary_lines.append(f"Rejected citations: {rejected_citations} unsupported values (excluded from evidence)")
 
     prompt = REPORT_PROMPT.format(
         review_mode=context.get("review_mode", "scoping"),
@@ -253,7 +256,7 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         for var, values in var_values.items():
             lines.append(f"#### {var}")
             lines.append("")
-            found = [v for v in values if v not in ("NON TROUVÉ", "ERREUR API")]
+            found = [v for v in values if v not in ("NON TROUVÉ", "ERREUR API", "CITATION REJETÉE")]
             if found:
                 for v in found:
                     lines.append(f"- {v}")
@@ -263,6 +266,9 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
             api_errors = sum(1 for v in values if v == "ERREUR API")
             if api_errors > 0:
                 lines.append(f"- ❌ ERREUR API dans {api_errors} article(s) non évalué(s)")
+            rejected_citations = sum(1 for v in values if v == "CITATION REJETÉE")
+            if rejected_citations > 0:
+                lines.append(f"- ❌ CITATION REJETÉE dans {rejected_citations} article(s)")
             lines.append("")
         if not var_values:
             lines.append("*(aucune donnée extraite)*")
@@ -322,9 +328,10 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         "Le tableau complet est dans [`extraction.csv`](extraction.csv).",
         "",
         f"**Total cellules :** {len(extractions)}",
-        f"**Valeurs extraites :** {sum(1 for e in extractions if e['valeur'] not in ('NON TROUVÉ', 'ERREUR API'))}",
+        f"**Valeurs extraites :** {sum(1 for e in extractions if e['valeur'] not in ('NON TROUVÉ', 'ERREUR API', 'CITATION REJETÉE'))}",
         f"**Non trouvées :** {sum(1 for e in extractions if e['valeur'] == 'NON TROUVÉ')}",
         f"**Erreurs API (non évaluées) :** {sum(1 for e in extractions if e['valeur'] == 'ERREUR API')}",
+        f"**Citations rejetées :** {sum(1 for e in extractions if e['valeur'] == 'CITATION REJETÉE')}",
     ])
 
     # Déterminer les modèles utilisés (réels ou fallback)

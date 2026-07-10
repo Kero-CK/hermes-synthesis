@@ -27,7 +27,7 @@ KNOWN_JOURNAL_VOCABULARY = {
     "human_review": {"include", "exclude"},
     "screen_manual": {"include", "exclude"},  # alias historique
     "fulltext": {"retrieved", "retrieval_failed", "include", "needs_manual"},
-    "extract": {"extracted", "not_found", "api_error", "include", "needs_manual"},
+    "extract": {"extracted", "not_found", "api_error", "rejected_citation", "include", "needs_manual"},
 }
 HUMAN_SCREEN_STAGES = {"human_review", "screen_manual"}
 

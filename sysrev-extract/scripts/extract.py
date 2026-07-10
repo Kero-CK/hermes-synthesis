@@ -18,7 +18,9 @@ JSON attendu:
 import csv
 import json
 import os
+import re
 import sys
+import unicodedata
 from datetime import datetime, timezone
 
 
@@ -28,7 +30,7 @@ KNOWN_JOURNAL_VOCABULARY = {
     "human_review": {"include", "exclude"},
     "screen_manual": {"include", "exclude"},  # alias historique
     "fulltext": {"retrieved", "retrieval_failed", "include", "needs_manual"},
-    "extract": {"extracted", "not_found", "api_error", "include", "needs_manual"},
+    "extract": {"extracted", "not_found", "api_error", "rejected_citation", "include", "needs_manual"},
 }
 
 
@@ -36,6 +38,19 @@ def is_known_journal_entry(entry: dict) -> bool:
     """Vérifie le couple stage/décision, y compris les alias historiques."""
     stage = entry.get("stage")
     return entry.get("decision") in KNOWN_JOURNAL_VOCABULARY.get(stage, set())
+
+
+def normalize_evidence_text(text: str) -> str:
+    """Normalise les artefacts PDF sans assouplir la casse ni la ponctuation."""
+    normalized = unicodedata.normalize("NFKC", text).replace("\u00ad", "")
+    normalized = re.sub(r"(?<=\w)-[ \t]*\r?\n[ \t]*(?=\w)", "", normalized)
+    return " ".join(normalized.split()).strip()
+
+
+def citation_is_verifiable(citation: str, fulltext: str) -> bool:
+    """Vérifie qu'une citation non vide est présente dans le texte normalisé."""
+    normalized_citation = normalize_evidence_text(citation)
+    return bool(normalized_citation) and normalized_citation in normalize_evidence_text(fulltext)
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +347,7 @@ def main(rid: str, use_mock: bool = False):
     rows: list[dict] = []
     not_found = 0
     api_errors = 0
+    rejected_citations = 0
     total = 0
 
     for doi in included_dois:
@@ -353,6 +369,11 @@ def main(rid: str, use_mock: bool = False):
             citation = result["citation"]
             section = result.get("section", "")
 
+            if valeur not in ("NON TROUVÉ", "ERREUR API") and not citation_is_verifiable(citation, fulltext):
+                valeur = "CITATION REJETÉE"
+                citation = ""
+                section = ""
+
             rows.append({
                 "doi": doi,
                 "variable": var["name"],
@@ -361,7 +382,12 @@ def main(rid: str, use_mock: bool = False):
                 "section": section,
             })
 
-            if valeur == "ERREUR API":
+            if valeur == "CITATION REJETÉE":
+                rejected_citations += 1
+                log_decision(base, doi, var["name"], "rejected_citation",
+                             "Citation non vérifiable dans le texte source", run_id)
+                print(f"  ❌ {doi_safe} / {var['name']} → CITATION REJETÉE")
+            elif valeur == "ERREUR API":
                 api_errors += 1
                 log_decision(base, doi, var["name"], "api_error",
                              "Échec API LLM — variable non évaluée", run_id)
@@ -389,15 +415,17 @@ def main(rid: str, use_mock: bool = False):
     manifest["extraction_total"] = total
     manifest["extraction_not_found"] = not_found
     manifest["extraction_api_errors"] = api_errors
+    manifest["extraction_rejected_citations"] = rejected_citations
     manifest["updated"] = datetime.now(timezone.utc).isoformat()
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     # Résumé
     print(f"\n📊 Résultat extraction :")
-    print(f"   ✅ Extraites    : {total - not_found - api_errors}")
+    print(f"   ✅ Extraites    : {total - not_found - api_errors - rejected_citations}")
     print(f"   ⚠️  NON TROUVÉ  : {not_found}")
     print(f"   ❌ Erreurs API : {api_errors}")
+    print(f"   ❌ Citations rejetées : {rejected_citations}")
     print(f"   📋 Total        : {total} cellules")
     print(f"   📁 Fichier      : {csv_path}")
     if api_errors:
