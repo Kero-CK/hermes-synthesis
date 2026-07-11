@@ -32,8 +32,10 @@ et spécifiques à ta discipline.
 # Pré-conditions
 
 - Le LLM est câblé dans `sysrev-screen` (LLM_API_ENDPOINT + LLM_API_KEY)
-- Un gold set existe : `gold_set.csv` avec colonnes `title,abstract,doi,label`
-  où `label` = `include` ou `exclude` (décision humaine)
+- Un gold set existe : `gold_set.csv` avec colonnes
+  `title,abstract,doi,label,stratum,abstract_source`, où `label` vaut
+  `include` ou `exclude`, `stratum` identifie la strate d'échantillonnage
+  (`A`/`B`) et `abstract_source=none` signale l'absence d'abstract.
 - 50-100 articles recommandés pour une calibration fiable
 
 # Procédure
@@ -41,9 +43,9 @@ et spécifiques à ta discipline.
 1. **Crée le gold set.** L'utilisateur étiquette manuellement 50-100 articles
    depuis `candidates.csv` (ou un export). Format :
    ```csv
-   title,abstract,doi,label
-   "Titre article","Abstract...","10.xxx","include"
-   "Autre titre","Abstract...","10.yyy","exclude"
+   title,abstract,doi,label,stratum,abstract_source
+   "Titre article","Abstract...","10.xxx","include","A","manual"
+   "Autre titre","Abstract...","10.yyy","exclude","B","openalex"
    ```
 
 2. Exécute :
@@ -52,13 +54,15 @@ et spécifiques à ta discipline.
    ```
    avec :
    ```json
-   {"id": "ma-revue"}
+   {"id": "ma-revue", "N_A": 13, "N_B": 1226, "n_A": 13, "n_B": 75}
    ```
 
 3. Le script :
    - Fait passer chaque article du gold set dans le LLM (comme screen)
    - Compare décision LLM vs label humain pour différents seuils
-   - Calcule recall, précision, F1, κ de Cohen
+   - Calcule recall, précision et F1 bruts et pondérés par strate
+   - Calcule κ de Cohen sur l'échantillon brut uniquement
+   - Produit les métriques par strate et l'analyse de sensibilité sans abstract
    - Suggère les seuils optimaux
 
 4. Présente les résultats et les seuils recommandés.
@@ -71,6 +75,35 @@ et spécifiques à ta discipline.
 | **Précision** | Proportion d'articles inclus qui sont vraiment pertinents. |
 | **F1** | Moyenne harmonique recall/précision. |
 | **κ de Cohen** | Accord IA vs humain corrigé du hasard. >0.6 = bon, >0.8 = excellent. |
+
+## Pondération du plan stratifié
+
+Chaque ligne contribue à la matrice de confusion avec le poids de sa strate :
+
+```text
+w_A = N_A / n_A
+w_B = N_B / n_B
+recall_w    = ΣwTP / (ΣwTP + ΣwFN)
+precision_w = ΣwTP / (ΣwTP + ΣwFP)
+```
+
+Les valeurs par défaut sont `N_A=13`, `n_A=13`, `N_B=1226`, `n_B=75`,
+soit `w_A=1` et `w_B≈16.347`. Le nombre de lignes observé dans chaque strate
+doit correspondre à `n_A`/`n_B`. Si le gold set change légitimement, ajuster
+ces paramètres dans le payload ; ne pas modifier le script.
+
+Le rapport conserve simultanément les métriques brutes et pondérées. κ de
+Cohen reste **strictement non pondéré**, car un κ pondéré entre strates n'est
+pas défini ici. Les métriques A et B sont aussi publiées séparément ; la strate
+A (`n=13` par défaut) porte un avertissement de petit effectif.
+
+## Sensibilité aux abstracts absents
+
+Pour les lignes dont `abstract_source=none`, le rapport recalcule les métriques
+pondérées en forçant toutes leurs prédictions à `include`, puis à `exclude`.
+Le point estimé et la plage numérique min/max sont enregistrés. Dans tous les
+scénarios, `needs_manual` reste compté comme `exclude` selon la convention
+conservatrice.
 
 # Règles
 
@@ -87,13 +120,21 @@ et spécifiques à ta discipline.
 ```json
 {
   "n_samples": 47,
-  "default_metrics": {"recall": 0.91, "precision": 0.83, "f1": 0.87, "cohens_kappa": 0.71},
+  "sampling": {"parameters": {"N_A": 13, "N_B": 1226, "n_A": 13, "n_B": 75}, "weights": {"A": 1.0, "B": 16.346667}},
+  "default_metrics": {
+    "raw": {"recall": 0.91, "precision": 0.83, "f1": 0.87, "cohens_kappa": 0.71},
+    "weighted": {"recall": 0.88, "precision": 0.52, "f1": 0.65}
+  },
+  "per_stratum": {"A": {"n": 13}, "B": {"n": 75}},
+  "abstract_source_none_sensitivity": {"n_abstract_source_none": 3, "range": {"recall": {"min": 0.84, "max": 0.91}}},
   "threshold_menu": [
-    {"threshold_include": 0.85, "recall": 0.82, "precision": 0.91, "ambiguous_pct": 3.0},
-    {"threshold_include": 0.80, "recall": 0.87, "precision": 0.88, "ambiguous_pct": 5.0},
-    {"threshold_include": 0.75, "recall": 0.91, "precision": 0.83, "ambiguous_pct": 9.0},
-    {"threshold_include": 0.70, "recall": 0.94, "precision": 0.78, "ambiguous_pct": 14.0},
-    {"threshold_include": 0.65, "recall": 0.97, "precision": 0.71, "ambiguous_pct": 22.0}
+    {
+      "threshold_include": 0.85,
+      "threshold_exclude": 0.35,
+      "metrics_raw": {"recall": 0.82, "precision": 0.91},
+      "metrics_weighted": {"recall": 0.78, "precision": 0.62},
+      "ambiguous_pct": 3.0
+    }
   ]
 }
 ```
@@ -119,7 +160,7 @@ Le menu affiché dans le terminal :
 
 # Journalisation
 
-- `manifest.json` : `calibration = {recall, precision, kappa, thresholds}`
+- `manifest.json` : métriques headline pondérées, métriques brutes et κ brut
 - `manifest.json` : `stage = "calibrated"`
 
 # Pièges connus
@@ -134,8 +175,12 @@ Le menu affiché dans le terminal :
   comme labels dans `gold_set.csv`. Les articles encore en `needs_manual` doivent
   être tranchés par l'humain AVANT d'être ajoutés au gold set.
 
+- **Strate absente ou effectif incohérent** : le script échoue avant tout appel
+  LLM. Le message affiche les effectifs observés et rappelle que `n_A`/`n_B`
+  sont des paramètres du payload pour gérer une modification légitime du corpus.
+
 # Critère de fin (Definition of Done)
 
-- `calibration.json` existe avec recall ≥ 0.85 (sinon, revoir le prompt ou le gold set)
+- `calibration.json` existe avec recall pondéré ≥ 0.85 (sinon, revoir le prompt ou le gold set)
 - Les seuils optimaux sont documentés
 - `manifest.json` indique `stage = "calibrated"`

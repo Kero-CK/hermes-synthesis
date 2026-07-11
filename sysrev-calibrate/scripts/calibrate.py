@@ -10,10 +10,11 @@ Usage:
   python3 calibrate.py '<json>'
 
 JSON attendu:
-  {"id": "ma-revue"}
+  {"id": "ma-revue", "N_A": 13, "N_B": 1226, "n_A": 13, "n_B": 75}
 
 Gold set attendu:
-  /reviews/<id>/gold_set.csv  (title, abstract, doi, label)
+  /reviews/<id>/gold_set.csv
+  (title, abstract, doi, label, stratum, abstract_source)
 """
 
 import csv
@@ -88,19 +89,46 @@ def call_llm(prompt: str, user_message: str) -> dict | None:
 # Métriques
 # ---------------------------------------------------------------------------
 
+DEFAULT_SAMPLING = {"N_A": 13, "N_B": 1226, "n_A": 13, "n_B": 75}
+
+
+def compute_binary_metrics(y_true: list[str], y_pred: list[str],
+                           weights: list[float] | None = None) -> dict:
+    """Calcule la matrice de confusion et les métriques binaires."""
+    if len(y_true) != len(y_pred):
+        raise ValueError("y_true et y_pred doivent avoir la même longueur")
+    if weights is None:
+        weights = [1.0] * len(y_true)
+    if len(weights) != len(y_true):
+        raise ValueError("weights doit avoir la même longueur que y_true")
+
+    tp = sum(w for t, p, w in zip(y_true, y_pred, weights) if t == "include" and p == "include")
+    fp = sum(w for t, p, w in zip(y_true, y_pred, weights) if t == "exclude" and p == "include")
+    fn = sum(w for t, p, w in zip(y_true, y_pred, weights) if t == "include" and p == "exclude")
+    tn = sum(w for t, p, w in zip(y_true, y_pred, weights) if t == "exclude" and p == "exclude")
+
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    return {
+        "recall": round(recall, 4),
+        "precision": round(precision, 4),
+        "f1": round(f1, 4),
+        "tp": round(tp, 4), "fp": round(fp, 4),
+        "fn": round(fn, 4), "tn": round(tn, 4),
+    }
+
+
 def compute_metrics(y_true: list[str], y_pred: list[str]) -> dict:
     """
     Calcule recall, précision, F1.
     y_true/y_pred : listes de "include" ou "exclude"
     """
-    tp = sum(1 for t, p in zip(y_true, y_pred) if t == "include" and p == "include")
-    fp = sum(1 for t, p in zip(y_true, y_pred) if t == "exclude" and p == "include")
-    fn = sum(1 for t, p in zip(y_true, y_pred) if t == "include" and p == "exclude")
-    tn = sum(1 for t, p in zip(y_true, y_pred) if t == "exclude" and p == "exclude")
-
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+    metrics = compute_binary_metrics(y_true, y_pred)
+    for key in ("tp", "fp", "fn", "tn"):
+        metrics[key] = int(metrics[key])
+    tp, fp, fn, tn = (metrics[key] for key in ("tp", "fp", "fn", "tn"))
 
     # κ de Cohen
     n = len(y_true)
@@ -110,16 +138,102 @@ def compute_metrics(y_true: list[str], y_pred: list[str]) -> dict:
     p_e = p_include + p_exclude  # accord aléatoire
     kappa = (p_o - p_e) / (1 - p_e) if (1 - p_e) > 0 else 0.0
 
+    metrics["cohens_kappa"] = round(kappa, 4)
+    return metrics
+
+
+def validate_sampling(gold: list[dict], sampling: dict[str, int]) -> dict[str, float]:
+    """Valide le plan d'échantillonnage et retourne les poids par strate."""
+    observed: dict[str, int] = {}
+    for line_number, row in enumerate(gold, 2):
+        stratum = row.get("stratum", "").strip()
+        if not stratum:
+            raise ValueError(f"Ligne CSV {line_number}: stratum manquant")
+        if f"N_{stratum}" not in sampling or f"n_{stratum}" not in sampling:
+            raise ValueError(
+                f"Ligne CSV {line_number}: strate '{stratum}' absente des paramètres "
+                f"N_{stratum}/n_{stratum} du payload"
+            )
+        observed[stratum] = observed.get(stratum, 0) + 1
+
+    weights: dict[str, float] = {}
+    configured_strata = {
+        key[2:] for key in sampling if key.startswith("N_") and f"n_{key[2:]}" in sampling
+    }
+    for stratum in configured_strata:
+        population = sampling[f"N_{stratum}"]
+        sample = sampling[f"n_{stratum}"]
+        if population <= 0 or sample <= 0 or population < sample:
+            raise ValueError(
+                f"Paramètres invalides pour la strate {stratum}: "
+                f"N_{stratum}={population}, n_{stratum}={sample}; exiger N >= n > 0"
+            )
+        weights[stratum] = population / sample
+
+    mismatches = [
+        f"{stratum}: observé={count}, n_{stratum}={sampling[f'n_{stratum}']}"
+        for stratum in sorted(configured_strata)
+        for count in [observed.get(stratum, 0)]
+        if count != sampling[f"n_{stratum}"]
+    ]
+    if mismatches:
+        observed_text = ", ".join(
+            f"{stratum}={observed.get(stratum, 0)}" for stratum in sorted(configured_strata)
+        )
+        raise ValueError(
+            "Effectifs du gold set incompatibles avec le plan d'échantillonnage "
+            f"({'; '.join(mismatches)}). Effectifs observés: {observed_text}. "
+            "Si le gold set a légitimement changé, ajuste n_A/n_B dans le payload; "
+            "ne modifie pas le script."
+        )
+    return weights
+
+
+def compute_per_stratum(y_true: list[str], y_pred: list[str],
+                         strata: list[str], weights_by_stratum: dict[str, float]) -> dict:
+    """Calcule les métriques brutes séparément pour chaque strate."""
+    result = {}
+    for stratum in sorted(set(strata)):
+        indexes = [i for i, value in enumerate(strata) if value == stratum]
+        result[stratum] = {
+            "n": len(indexes),
+            "weight": round(weights_by_stratum[stratum], 6),
+            "metrics_raw": compute_metrics(
+                [y_true[i] for i in indexes], [y_pred[i] for i in indexes]
+            ),
+        }
+    return result
+
+
+def compute_sensitivity(y_true: list[str], y_pred: list[str], weights: list[float],
+                        abstract_sources: list[str]) -> dict:
+    """Encadre l'effet des articles sans abstract sur les métriques pondérées."""
+    flagged = [source.strip().lower() == "none" for source in abstract_sources]
+    variants = {}
+    for name, forced_decision in (("all_machine_include", "include"),
+                                  ("all_machine_exclude", "exclude")):
+        predictions = [
+            forced_decision if is_flagged else prediction
+            for prediction, is_flagged in zip(y_pred, flagged)
+        ]
+        variants[name] = compute_binary_metrics(y_true, predictions, weights)
+    point = compute_binary_metrics(y_true, y_pred, weights)
     return {
-        "recall": round(recall, 4),
-        "precision": round(precision, 4),
-        "f1": round(f1, 4),
-        "cohens_kappa": round(kappa, 4),
-        "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+        "n_abstract_source_none": sum(flagged),
+        "point_estimate": point,
+        **variants,
+        "range": {
+            metric: {
+                "min": min(variants[name][metric] for name in variants),
+                "max": max(variants[name][metric] for name in variants),
+            }
+            for metric in ("recall", "precision")
+        },
     }
 
 
-def compute_threshold_menu(scores: list[float], y_true: list[str]) -> list[dict]:
+def compute_threshold_menu(scores: list[float], y_true: list[str],
+                           weights: list[float]) -> list[dict]:
     """
     Calcule recall, précision, F1 et % d'ambigus pour une gamme de seuils.
     Retourne une liste utilisable pour un menu de choix.
@@ -137,13 +251,14 @@ def compute_threshold_menu(scores: list[float], y_true: list[str]) -> list[dict]
             else:
                 preds.append("needs_manual")
                 ambiguous += 1
-        m = compute_metrics(y_true, [p if p != "needs_manual" else "exclude" for p in preds])
+        conservative = [p if p != "needs_manual" else "exclude" for p in preds]
+        raw = compute_metrics(y_true, conservative)
+        weighted = compute_binary_metrics(y_true, conservative, weights)
         results.append({
             "threshold_include": ti,
             "threshold_exclude": te,
-            "recall": m["recall"],
-            "precision": m["precision"],
-            "f1": m["f1"],
+            "metrics_raw": raw,
+            "metrics_weighted": weighted,
             "ambiguous_pct": round(ambiguous / len(scores) * 100, 1),
         })
     return results
@@ -153,20 +268,32 @@ def compute_threshold_menu(scores: list[float], y_true: list[str]) -> list[dict]
 # Point d'entrée
 # ---------------------------------------------------------------------------
 
-def main(rid: str):
+def main(rid: str, sampling: dict[str, int]):
     base = f"/reviews/{rid}"
     gold_path = f"{base}/gold_set.csv"
     protocol_path = f"{base}/protocol.md"
 
     if not os.path.exists(gold_path):
         print(f"❌ {gold_path} introuvable.", file=sys.stderr)
-        print("   Crée un fichier gold_set.csv avec colonnes: title,abstract,doi,label", file=sys.stderr)
+        print("   Colonnes requises: title,abstract,doi,label,stratum,abstract_source", file=sys.stderr)
         print("   label = 'include' ou 'exclude' (décision humaine)", file=sys.stderr)
         sys.exit(1)
 
     # Charge le gold set
     with open(gold_path, newline="", encoding="utf-8") as f:
-        gold = list(csv.DictReader(f))
+        reader = csv.DictReader(f)
+        required_columns = {"title", "abstract", "doi", "label", "stratum", "abstract_source"}
+        missing_columns = sorted(required_columns - set(reader.fieldnames or []))
+        if missing_columns:
+            print(f"❌ Colonnes gold_set.csv manquantes: {', '.join(missing_columns)}", file=sys.stderr)
+            sys.exit(1)
+        gold = list(reader)
+
+    try:
+        weights_by_stratum = validate_sampling(gold, sampling)
+    except ValueError as error:
+        print(f"❌ {error}", file=sys.stderr)
+        sys.exit(1)
 
     if len(gold) < 10:
         print(f"⚠️  Seulement {len(gold)} articles dans le gold set. 50+ recommandés.", file=sys.stderr)
@@ -199,6 +326,8 @@ def main(rid: str):
     scores: list[float] = []
     y_true: list[str] = []
     y_pred_hard: list[str] = []  # décision binaire avec seuils par défaut
+    evaluated_strata: list[str] = []
+    evaluated_abstract_sources: list[str] = []
     errors = 0
 
     for i, row in enumerate(gold, 1):
@@ -228,6 +357,8 @@ def main(rid: str):
             score = max(0.0, min(1.0, float(result["score"])))
             scores.append(score)
             y_true.append(label)
+            evaluated_strata.append(row["stratum"].strip())
+            evaluated_abstract_sources.append(row["abstract_source"].strip())
             # Décision binaire avec seuils par défaut
             if score >= 0.75:
                 y_pred_hard.append("include")
@@ -249,17 +380,39 @@ def main(rid: str):
         prediction if prediction != "needs_manual" else "exclude"
         for prediction in y_pred_hard
     ]
-    metrics = compute_metrics(y_true, conservative_predictions)
+    evaluated_weights = [weights_by_stratum[stratum] for stratum in evaluated_strata]
+    metrics_raw = compute_metrics(y_true, conservative_predictions)
+    metrics_weighted = compute_binary_metrics(y_true, conservative_predictions, evaluated_weights)
+    per_stratum = compute_per_stratum(
+        y_true, conservative_predictions, evaluated_strata, weights_by_stratum
+    )
+    sensitivity = compute_sensitivity(
+        y_true, conservative_predictions, evaluated_weights, evaluated_abstract_sources
+    )
 
     # Menu de compromis
-    menu = compute_threshold_menu(scores, y_true)
+    menu = compute_threshold_menu(scores, y_true, evaluated_weights)
 
     # Calibration
     calibration = {
         "n_samples": len(scores),
         "n_errors": errors,
         "default_thresholds": {"include": 0.75, "exclude": 0.25},
-        "default_metrics": metrics,
+        "sampling": {
+            "parameters": sampling,
+            "weights": {key: round(value, 6) for key, value in weights_by_stratum.items()},
+            "observed": {
+                stratum: sum(1 for row in gold if row["stratum"].strip() == stratum)
+                for stratum in sorted(weights_by_stratum)
+            },
+        },
+        "default_metrics": {
+            "raw": metrics_raw,
+            "weighted": metrics_weighted,
+            "cohens_kappa_raw_note": "κ de Cohen calculé sur l'échantillon brut uniquement; aucun κ pondéré n'est calculé.",
+        },
+        "per_stratum": per_stratum,
+        "abstract_source_none_sensitivity": sensitivity,
         "note": "needs_manual compté comme exclude dans les métriques (convention conservatrice, identique au menu)",
         "threshold_menu": menu,
     }
@@ -273,9 +426,11 @@ def main(rid: str):
     manifest["stage"] = "calibrated"
     manifest["calibration"] = {
         "n_samples": len(scores),
-        "recall": metrics["recall"],
-        "precision": metrics["precision"],
-        "kappa": metrics["cohens_kappa"],
+        "recall_weighted": metrics_weighted["recall"],
+        "precision_weighted": metrics_weighted["precision"],
+        "recall_raw": metrics_raw["recall"],
+        "precision_raw": metrics_raw["precision"],
+        "kappa_raw": metrics_raw["cohens_kappa"],
     }
     manifest["updated"] = datetime.now(timezone.utc).isoformat()
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -287,16 +442,40 @@ def main(rid: str):
 
    Par défaut (0.75/0.25) :
      needs_manual compté comme exclude (convention conservatrice)
-     Recall : {metrics['recall']:.1%}  |  Précision : {metrics['precision']:.1%}
-     F1 : {metrics['f1']:.1%}  |  κ Cohen : {metrics['cohens_kappa']:.2f}
+     Pondéré — Recall : {metrics_weighted['recall']:.1%}  |  Précision : {metrics_weighted['precision']:.1%}
+     Brut     — Recall : {metrics_raw['recall']:.1%}  |  Précision : {metrics_raw['precision']:.1%}
+     Brut     — F1 : {metrics_raw['f1']:.1%}  |  κ Cohen : {metrics_raw['cohens_kappa']:.2f}
+     κ de Cohen calculé sur l'échantillon brut uniquement (aucun κ pondéré).
 """)
 
+    print("   Par strate :")
+    for stratum, values in per_stratum.items():
+        stratum_metrics = values["metrics_raw"]
+        print(
+            f"     {stratum} (n={values['n']}, poids={values['weight']:.3f}) — "
+            f"Recall : {stratum_metrics['recall']:.1%} | "
+            f"Précision : {stratum_metrics['precision']:.1%}"
+        )
+        if stratum == "A":
+            print(f"       ⚠️  Strate A : n={values['n']} — petit effectif, interprétation prudente.")
+
+    bounds = sensitivity["range"]
+    print(
+        f"\n   Sensibilité abstract_source=none (n={sensitivity['n_abstract_source_none']}) :\n"
+        f"     Recall pondéré point={metrics_weighted['recall']:.1%}, "
+        f"plage={bounds['recall']['min']:.1%}–{bounds['recall']['max']:.1%}\n"
+        f"     Précision pondérée point={metrics_weighted['precision']:.1%}, "
+        f"plage={bounds['precision']['min']:.1%}–{bounds['precision']['max']:.1%}\n"
+    )
+
     print("   Menu de compromis :\n")
-    print(f"   {'Seuil':>8} | {'Recall':>8} | {'Précision':>10} | {'Ambigus':>8}")
-    print(f"   {'-'*8}-+-{'-'*8}-+-{'-'*10}-+-{'-'*8}")
+    print(f"   {'Seuil':>8} | {'Recall W':>8} | {'Préc. W':>8} | {'Recall brut':>11} | {'Préc. brute':>11} | {'Ambigus':>8}")
+    print(f"   {'-'*8}-+-{'-'*8}-+-{'-'*8}-+-{'-'*11}-+-{'-'*11}-+-{'-'*8}")
     for row in menu:
         bar = "█" * int(row["ambiguous_pct"] / 3)
-        print(f"   {row['threshold_include']:.2f}/{row['threshold_exclude']:.2f}  | {row['recall']:>7.0%}  | {row['precision']:>9.0%}  | {row['ambiguous_pct']:>5.0f}% {bar}")
+        weighted = row["metrics_weighted"]
+        raw = row["metrics_raw"]
+        print(f"   {row['threshold_include']:.2f}/{row['threshold_exclude']:.2f}  | {weighted['recall']:>7.0%}  | {weighted['precision']:>7.0%}  | {raw['recall']:>10.0%}  | {raw['precision']:>10.0%}  | {row['ambiguous_pct']:>5.0f}% {bar}")
 
     print(f"""
    💡 Recommandations par discipline :
@@ -329,4 +508,11 @@ if __name__ == "__main__":
         print("JSON invalide : 'id' requis.", file=sys.stderr)
         sys.exit(1)
 
-    main(rid=rid)
+    sampling = {key: payload.get(key, default) for key, default in DEFAULT_SAMPLING.items()}
+    try:
+        sampling = {key: int(value) for key, value in sampling.items()}
+    except (TypeError, ValueError):
+        print("Paramètres N_A, N_B, n_A et n_B invalides: entiers requis.", file=sys.stderr)
+        sys.exit(1)
+
+    main(rid=rid, sampling=sampling)
