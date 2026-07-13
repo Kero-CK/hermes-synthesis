@@ -92,6 +92,29 @@ def call_llm(prompt: str, user_message: str) -> dict | None:
 DEFAULT_SAMPLING = {"N_A": 13, "N_B": 1226, "n_A": 13, "n_B": 75}
 
 
+def validate_protocol_file(protocol_path: str) -> None:
+    """Refuse une calibration sans protocole exploitable."""
+    if not os.path.isfile(protocol_path):
+        print(
+            f"ERROR: protocol file missing: {protocol_path}\n"
+            "       protocol.md supplies the inclusion/exclusion criteria used "
+            "to score the gold set.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    with open(protocol_path, encoding="utf-8") as protocol_file:
+        protocol_text = protocol_file.read()
+    if len("".join(protocol_text.split())) < 100:
+        print(
+            f"ERROR: protocol file is empty or too short: {protocol_path}\n"
+            "       protocol.md must contain the inclusion/exclusion criteria "
+            "used to score the gold set (at least 100 non-whitespace characters).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def compute_binary_metrics(y_true: list[str], y_pred: list[str],
                            weights: list[float] | None = None) -> dict:
     """Calcule la matrice de confusion et les métriques binaires."""
@@ -272,6 +295,8 @@ def main(rid: str, sampling: dict[str, int]):
     base = f"/reviews/{rid}"
     gold_path = f"{base}/gold_set.csv"
     protocol_path = f"{base}/protocol.md"
+
+    validate_protocol_file(protocol_path)
 
     if not os.path.exists(gold_path):
         print(f"❌ {gold_path} introuvable.", file=sys.stderr)
