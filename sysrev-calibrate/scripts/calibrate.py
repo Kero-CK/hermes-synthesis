@@ -20,6 +20,7 @@ Gold set attendu:
 import csv
 import json
 import os
+import statistics
 import sys
 from datetime import datetime, timezone
 
@@ -113,6 +114,54 @@ def validate_protocol_file(protocol_path: str) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+
+SCORE_CSV_FIELDS = [
+    "doi",
+    "stratum",
+    "abstract_source",
+    "human_label",
+    "llm_score",
+    "llm_decision_at_default_thresholds",
+    "api_error_flag",
+]
+
+
+def write_calibration_scores(scores_path: str, rows: list[dict]) -> None:
+    """Persiste les scores bruts avant tout calcul d'agrégat."""
+    with open(scores_path, "w", newline="", encoding="utf-8") as scores_file:
+        writer = csv.DictWriter(scores_file, fieldnames=SCORE_CSV_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def compute_score_distribution(scores: list[float]) -> dict:
+    """Résume les scores réussis dans des bins de largeur 0.05."""
+    bins = {
+        f"{index * 0.05:.2f}-{(index + 1) * 0.05:.2f}": 0
+        for index in range(20)
+    }
+    for score in scores:
+        index = min(int((score + 1e-12) / 0.05), 19)
+        label = f"{index * 0.05:.2f}-{(index + 1) * 0.05:.2f}"
+        bins[label] += 1
+    return {
+        "n_scored": len(scores),
+        "min": min(scores) if scores else None,
+        "max": max(scores) if scores else None,
+        "mean": statistics.mean(scores) if scores else None,
+        "median": statistics.median(scores) if scores else None,
+        "bins_0.05": bins,
+    }
+
+
+def decision_at_default_thresholds(score: float) -> str:
+    """Retourne la décision brute aux seuils par défaut."""
+    if score >= 0.75:
+        return "include"
+    if score <= 0.25:
+        return "exclude"
+    return "needs_manual"
 
 
 def compute_binary_metrics(y_true: list[str], y_pred: list[str],
@@ -353,15 +402,26 @@ def main(rid: str, sampling: dict[str, int]):
     y_pred_hard: list[str] = []  # décision binaire avec seuils par défaut
     evaluated_strata: list[str] = []
     evaluated_abstract_sources: list[str] = []
+    score_rows: list[dict[str, str]] = []
     errors = 0
 
     for i, row in enumerate(gold, 1):
         title = row.get("title", "")
         abstract = row.get("abstract", "")
         label = row.get("label", "").strip().lower()
+        score_row = {
+            "doi": row.get("doi", "").strip(),
+            "stratum": row.get("stratum", "").strip(),
+            "abstract_source": row.get("abstract_source", "").strip(),
+            "human_label": label,
+            "llm_score": "",
+            "llm_decision_at_default_thresholds": "",
+            "api_error_flag": "false",
+        }
 
         if label not in ("include", "exclude"):
             print(f"  ⚠️  Ligne {i}: label invalide '{label}' — ignorée")
+            score_rows.append(score_row)
             continue
 
         prompt = SCREENING_PROMPT.format(
@@ -385,16 +445,20 @@ def main(rid: str, sampling: dict[str, int]):
             evaluated_strata.append(row["stratum"].strip())
             evaluated_abstract_sources.append(row["abstract_source"].strip())
             # Décision binaire avec seuils par défaut
-            if score >= 0.75:
-                y_pred_hard.append("include")
-            elif score <= 0.25:
-                y_pred_hard.append("exclude")
-            else:
-                y_pred_hard.append("needs_manual")
+            decision_at_default = decision_at_default_thresholds(score)
+            y_pred_hard.append(decision_at_default)
+            score_row["llm_score"] = f"{score:.6f}"
+            score_row["llm_decision_at_default_thresholds"] = decision_at_default
+            score_rows.append(score_row)
             print(f"  [{i}/{len(gold)}] label={label:8s} score={score:.2f}  {title[:60]}...")
         else:
             errors += 1
+            score_row["api_error_flag"] = "true"
+            score_rows.append(score_row)
             print(f"  [{i}/{len(gold)}] ❌ erreur LLM — article ignoré")
+
+    scores_path = f"{base}/calibration_scores.csv"
+    write_calibration_scores(scores_path, score_rows)
 
     if len(scores) < 5:
         print(f"\n❌ Pas assez d'évaluations réussies ({len(scores)}). Vérifie la config LLM.", file=sys.stderr)
@@ -417,6 +481,7 @@ def main(rid: str, sampling: dict[str, int]):
 
     # Menu de compromis
     menu = compute_threshold_menu(scores, y_true, evaluated_weights)
+    score_distribution = compute_score_distribution(scores)
 
     # Calibration
     calibration = {
@@ -438,6 +503,8 @@ def main(rid: str, sampling: dict[str, int]):
         },
         "per_stratum": per_stratum,
         "abstract_source_none_sensitivity": sensitivity,
+        "scores_file": "calibration_scores.csv",
+        "score_distribution": score_distribution,
         "note": "needs_manual compté comme exclude dans les métriques (convention conservatrice, identique au menu)",
         "threshold_menu": menu,
     }
@@ -514,6 +581,8 @@ def main(rid: str, sampling: dict[str, int]):
 
    📁 {cal_path}
 """)
+
+    print(f"   📄 Scores bruts : {scores_path}")
 
 
 if __name__ == "__main__":
