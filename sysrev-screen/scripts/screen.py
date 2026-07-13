@@ -32,6 +32,29 @@ import sys
 from datetime import datetime, timezone
 
 
+def validate_protocol_file(protocol_path: str) -> None:
+    """Refuse un screening sans protocole exploitable."""
+    if not os.path.isfile(protocol_path):
+        print(
+            f"ERROR: protocol file missing: {protocol_path}\n"
+            "       protocol.md supplies the inclusion/exclusion criteria used "
+            "to screen the candidates.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    with open(protocol_path, encoding="utf-8") as protocol_file:
+        protocol_text = protocol_file.read()
+    if len("".join(protocol_text.split())) < 100:
+        print(
+            f"ERROR: protocol file is empty or too short: {protocol_path}\n"
+            "       protocol.md must contain the inclusion/exclusion criteria "
+            "used to screen the candidates (at least 100 non-whitespace characters).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Évaluation réelle via LLM (API compatible OpenAI)
 # ---------------------------------------------------------------------------
@@ -249,6 +272,8 @@ def main(rid: str, threshold_include: float = 0.75,
     csv_path = f"{base}/candidates.csv"
     protocol_path = f"{base}/protocol.md"
     manifest_path = f"{base}/manifest.json"
+
+    validate_protocol_file(protocol_path)
 
     manifest = json.load(open(manifest_path, encoding="utf-8"))
     protected_stages = {"review_done", "fulltext_done", "extract_done", "report_done"}
