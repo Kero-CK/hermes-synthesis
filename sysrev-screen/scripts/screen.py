@@ -94,7 +94,7 @@ def sanitize_document(text: str) -> str:
 
 
 def _call_llm_api(system_prompt: str, user_message: str = "",
-                  max_tokens: int = 300) -> dict | None:
+                  max_tokens: int | None = None) -> dict | None:
     """
     Appelle une API compatible OpenAI pour le screening.
 
@@ -102,6 +102,7 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
       LLM_API_ENDPOINT  — ex: https://api.deepseek.com/v1
       LLM_API_KEY       — clé API
       LLM_SCREENING_MODEL — ex: deepseek-chat (défaut si non défini)
+      LLM_SCREENING_MAX_TOKENS — plafond de sortie (défaut : 8192)
 
     Retourne la réponse JSON parsée ou None en cas d'erreur.
     """
@@ -111,6 +112,8 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
     endpoint = os.environ.get("LLM_API_ENDPOINT", "")
     api_key = os.environ.get("LLM_API_KEY", "")
     model = os.environ.get("LLM_SCREENING_MODEL", "deepseek-chat")
+    if max_tokens is None:
+        max_tokens = int(os.environ.get("LLM_SCREENING_MAX_TOKENS", "8192"))
 
     if not endpoint or not api_key:
         print("  ⚠️  LLM non configuré : définis LLM_API_ENDPOINT et LLM_API_KEY.", file=sys.stderr)
@@ -135,7 +138,15 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
         })
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode())
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            if choice.get("finish_reason") == "length":
+                print(
+                    "  ⚠️  Réponse LLM tronquée (finish_reason=length) — "
+                    "augmente LLM_SCREENING_MAX_TOKENS.",
+                    file=sys.stderr,
+                )
+                return None
+            content = choice["message"]["content"]
             return json.loads(content)
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:500] if e.fp else ""

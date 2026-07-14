@@ -56,6 +56,7 @@ def call_llm(prompt: str, user_message: str) -> dict | None:
     endpoint = os.environ.get("LLM_API_ENDPOINT", "")
     api_key = os.environ.get("LLM_API_KEY", "")
     model = os.environ.get("LLM_SCREENING_MODEL", "deepseek-chat")
+    max_tokens = int(os.environ.get("LLM_SCREENING_MAX_TOKENS", "8192"))
 
     if not endpoint or not api_key:
         return None
@@ -68,7 +69,7 @@ def call_llm(prompt: str, user_message: str) -> dict | None:
             {"role": "user", "content": user_message}
         ],
         "temperature": 0.0,
-        "max_tokens": 200,
+        "max_tokens": max_tokens,
         "response_format": {"type": "json_object"},
     }).encode("utf-8")
 
@@ -79,7 +80,15 @@ def call_llm(prompt: str, user_message: str) -> dict | None:
         })
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode())
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            if choice.get("finish_reason") == "length":
+                print(
+                    "  ⚠️  Réponse LLM tronquée (finish_reason=length) — "
+                    "augmente LLM_SCREENING_MAX_TOKENS.",
+                    file=sys.stderr,
+                )
+                return None
+            content = choice["message"]["content"]
             return json.loads(content)
     except Exception as e:
         print(f"  ⚠️  LLM error: {e}", file=sys.stderr)
