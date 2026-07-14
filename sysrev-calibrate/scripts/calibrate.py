@@ -93,6 +93,44 @@ def call_llm(prompt: str, user_message: str) -> dict | None:
 DEFAULT_SAMPLING = {"N_A": 13, "N_B": 1226, "n_A": 13, "n_B": 75}
 
 
+def parse_sampling_payload(payload: dict) -> tuple[dict[str, int], bool]:
+    """Détecte le mode mono-strate avant d'appliquer les valeurs par défaut."""
+    single_flag = payload.get("single_stratum", False)
+    if not isinstance(single_flag, bool):
+        raise ValueError("'single_stratum' doit être un booléen")
+
+    a_keys = {key for key in ("N_A", "n_A") if key in payload}
+    b_keys = {key for key in ("N_B", "n_B") if key in payload}
+    if a_keys and a_keys != {"N_A", "n_A"}:
+        raise ValueError("N_A et n_A doivent être fournis ensemble")
+    if b_keys and b_keys != {"N_B", "n_B"}:
+        raise ValueError("N_B et n_B doivent être fournis ensemble")
+
+    single_stratum = single_flag or (a_keys == {"N_A", "n_A"} and not b_keys)
+    if single_stratum:
+        if a_keys != {"N_A", "n_A"}:
+            raise ValueError("Le mode mono-strate exige les paramètres N_A et n_A")
+        if b_keys:
+            raise ValueError("Le mode mono-strate ne doit pas recevoir de paramètres N_B/n_B")
+        sampling = {"N_A": payload["N_A"], "n_A": payload["n_A"]}
+    else:
+        sampling = {
+            key: payload.get(key, default)
+            for key, default in DEFAULT_SAMPLING.items()
+        }
+
+    try:
+        sampling = {key: int(value) for key, value in sampling.items()}
+    except (TypeError, ValueError):
+        print(
+            "Paramètres N_A/n_A (et N_B/n_B en mode stratifié) invalides: "
+            "entiers requis.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return sampling, single_stratum
+
+
 def validate_protocol_file(protocol_path: str) -> None:
     """Refuse une calibration sans protocole exploitable."""
     if not os.path.isfile(protocol_path):
@@ -214,8 +252,38 @@ def compute_metrics(y_true: list[str], y_pred: list[str]) -> dict:
     return metrics
 
 
-def validate_sampling(gold: list[dict], sampling: dict[str, int]) -> dict[str, float]:
+def validate_sampling(gold: list[dict], sampling: dict[str, int],
+                      single_stratum: bool = False) -> dict[str, float]:
     """Valide le plan d'échantillonnage et retourne les poids par strate."""
+    if single_stratum:
+        observed = 0
+        for line_number, row in enumerate(gold, 2):
+            stratum = row.get("stratum", "").strip()
+            if stratum != "A":
+                raise ValueError(
+                    f"Ligne CSV {line_number}: strate '{stratum or '(vide)'}' "
+                    "absente du payload mono-strate (A uniquement)"
+                )
+            observed += 1
+
+        population = sampling.get("N_A")
+        sample = sampling.get("n_A")
+        if population is None or sample is None:
+            raise ValueError("Le mode mono-strate exige les paramètres N_A et n_A")
+        if population <= 0 or sample <= 0 or population < sample:
+            raise ValueError(
+                f"Paramètres invalides pour la strate A: N_A={population}, n_A={sample}; "
+                "exiger N_A >= n_A > 0"
+            )
+        if observed != sample:
+            raise ValueError(
+                "Effectif du gold set incompatible avec le plan mono-strate "
+                f"(A: observé={observed}, n_A={sample}). "
+                "Ajuste n_A dans le payload si le gold set a légitimement changé; "
+                "ne modifie pas le script."
+            )
+        return {"A": 1.0}
+
     observed: dict[str, int] = {}
     for line_number, row in enumerate(gold, 2):
         stratum = row.get("stratum", "").strip()
@@ -340,7 +408,7 @@ def compute_threshold_menu(scores: list[float], y_true: list[str],
 # Point d'entrée
 # ---------------------------------------------------------------------------
 
-def main(rid: str, sampling: dict[str, int]):
+def main(rid: str, sampling: dict[str, int], single_stratum: bool = False):
     base = f"/reviews/{rid}"
     gold_path = f"{base}/gold_set.csv"
     protocol_path = f"{base}/protocol.md"
@@ -364,7 +432,7 @@ def main(rid: str, sampling: dict[str, int]):
         gold = list(reader)
 
     try:
-        weights_by_stratum = validate_sampling(gold, sampling)
+        weights_by_stratum = validate_sampling(gold, sampling, single_stratum)
     except ValueError as error:
         print(f"❌ {error}", file=sys.stderr)
         sys.exit(1)
@@ -395,6 +463,8 @@ def main(rid: str, sampling: dict[str, int]):
 
     # Évalue chaque article
     print(f"🧪 Calibration sur {len(gold)} articles du gold set...")
+    if single_stratum:
+        print("   Mode mono-strate A : poids 1.0, métriques pondérées = métriques brutes.")
     print()
 
     scores: list[float] = []
@@ -487,6 +557,7 @@ def main(rid: str, sampling: dict[str, int]):
     calibration = {
         "n_samples": len(scores),
         "n_errors": errors,
+        "single_stratum": single_stratum,
         "default_thresholds": {"include": 0.75, "exclude": 0.25},
         "sampling": {
             "parameters": sampling,
@@ -602,11 +673,10 @@ if __name__ == "__main__":
         print("JSON invalide : 'id' requis.", file=sys.stderr)
         sys.exit(1)
 
-    sampling = {key: payload.get(key, default) for key, default in DEFAULT_SAMPLING.items()}
     try:
-        sampling = {key: int(value) for key, value in sampling.items()}
-    except (TypeError, ValueError):
-        print("Paramètres N_A, N_B, n_A et n_B invalides: entiers requis.", file=sys.stderr)
+        sampling, single_stratum = parse_sampling_payload(payload)
+    except ValueError as error:
+        print(f"Paramètres d'échantillonnage invalides: {error}", file=sys.stderr)
         sys.exit(1)
 
-    main(rid=rid, sampling=sampling)
+    main(rid=rid, sampling=sampling, single_stratum=single_stratum)
