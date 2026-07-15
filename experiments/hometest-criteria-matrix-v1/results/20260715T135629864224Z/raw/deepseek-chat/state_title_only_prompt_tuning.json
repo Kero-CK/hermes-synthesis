@@ -1,0 +1,28 @@
+{
+  "id": "a7cee7cc-785c-413f-afb2-ba7959662193",
+  "object": "chat.completion",
+  "created": 1784124103,
+  "model": "deepseek-v4-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"schema\": \"criterion_assessment.v1-microtest\",\n  \"criteria\": [\n    {\n      \"id\": \"I1_PROMPT_TECHNIQUE\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"The title mentions 'Chain of Thought Prompt Tuning' but does not describe any concrete prompt-engineering operation. 'Prompt tuning' is defined as training prompt parameters, not a practitioner operation.\"\n    },\n    {\n      \"id\": \"I2_REPRODUCIBLE\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"No abstract is provided; the title alone does not expose an identifiable prompt structure or transferable method.\"\n    },\n    {\n      \"id\": \"I3_LLM_TARGET\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"The title mentions 'Vision Language Models' but does not specify if they are large language models or agents based on LLMs.\"\n    },\n    {\n      \"id\": \"I4_PRACTITIONER\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"No abstract; 'prompt tuning' is defined as training learned prompt parameters, which is not practitioner-usable without training.\"\n    },\n    {\n      \"id\": \"E1_NO_ACTIONABLE_TECHNIQUE\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"No abstract; the title does not describe an actionable prompt technique.\"\n    },\n    {\n      \"id\": \"E2_MODEL_TRAINING_ONLY\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"No abstract; 'prompt tuning' suggests training, but without abstract it is unclear.\"\n    },\n    {\n      \"id\": \"E3_BENCHMARK_ONLY\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"No abstract; cannot determine if it is a benchmark or evaluation.\"\n    },\n    {\n      \"id\": \"E4_APPLICATION_WITHOUT_PROMPT_DETAIL\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"No abstract; cannot determine if it reports a domain application.\"\n    },\n    {\n      \"id\": \"E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"No abstract; cannot determine if it is a survey or opinion.\"\n    }\n  ]\n}"
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1509,
+    "completion_tokens": 548,
+    "total_tokens": 2057,
+    "prompt_tokens_details": {
+      "cached_tokens": 1408
+    },
+    "prompt_cache_hit_tokens": 1408,
+    "prompt_cache_miss_tokens": 101
+  },
+  "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402"
+}

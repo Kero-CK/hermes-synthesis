@@ -1,0 +1,28 @@
+{
+  "id": "87804115-e1eb-476b-9bf0-ef9d94215143",
+  "object": "chat.completion",
+  "created": 1784124122,
+  "model": "deepseek-v4-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"schema\": \"criterion_assessment.v1-microtest\",\n  \"criteria\": [\n    {\n      \"id\": \"I1_PROMPT_TECHNIQUE\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"The title and abstract describe a survey of LLM-based autonomous agents, but do not describe or propose any concrete prompt-engineering operation.\"\n    },\n    {\n      \"id\": \"I2_REPRODUCIBLE\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"No identifiable prompt structure, instruction, sequence, procedure, or transferable method is described.\"\n    },\n    {\n      \"id\": \"I3_LLM_TARGET\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"A Survey on Large Language Model based Autonomous Agents\"},\n        {\"source\": \"S3\", \"quote\": \"large language models (LLMs) have demonstrated remarkable potential in achieving human-level intelligence\"}\n      ],\n      \"reason\": \"The title and abstract explicitly mention large language models as the basis for autonomous agents.\"\n    },\n    {\n      \"id\": \"I4_PRACTITIONER\",\n      \"status\": \"not_reported\",\n      \"evidence\": [],\n      \"reason\": \"No technique applicable by a practitioner through prompts or inference-time orchestration is described.\"\n    },\n    {\n      \"id\": \"E1_NO_ACTIONABLE_TECHNIQUE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we present a comprehensive survey of these studies, delivering a systematic review of the field of LLM-based autonomous agents from a holistic perspective\"}\n      ],\n      \"reason\": \"The article is a survey that does not propose or describe an actionable prompt technique.\"\n    },\n    {\n      \"id\": \"E2_MODEL_TRAINING_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S6\", \"quote\": \"we first discuss the construction of LLM-based autonomous agents, for which we propose a unified framework that encompasses a majority of the previous work\"}\n      ],\n      \"reason\": \"The article discusses construction of agents, not solely model training or fine-tuning.\"\n    },\n    {\n      \"id\": \"E3_BENCHMARK_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we present a comprehensive survey of these studies, delivering a systematic review of the field of LLM-based autonomous agents from a holistic perspective\"}\n      ],\n      \"reason\": \"The article is a survey, not a benchmark or model evaluation.\"\n    },\n    {\n      \"id\": \"E4_APPLICATION_WITHOUT_PROMPT_DETAIL\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S7\", \"quote\": \"we present a comprehensive overview of the diverse applications of LLM-based autonomous agents in the fields of social science, natural science, and engineering\"}\n      ],\n      \"reason\": \"The article reports applications without describing the prompt method in actionable detail.\"\n    },\n    {\n      \"id\": \"E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we present a comprehensive survey of these studies, delivering a systematic review of the field of LLM-based autonomous agents from a holistic perspective\"}\n      ],\n      \"reason\": \"The article is a survey that does not expose an isolable and actionable prompt technique.\"\n    }\n  ]\n}"
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1802,
+    "completion_tokens": 773,
+    "total_tokens": 2575,
+    "prompt_tokens_details": {
+      "cached_tokens": 1792
+    },
+    "prompt_cache_hit_tokens": 1792,
+    "prompt_cache_miss_tokens": 10
+  },
+  "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402"
+}

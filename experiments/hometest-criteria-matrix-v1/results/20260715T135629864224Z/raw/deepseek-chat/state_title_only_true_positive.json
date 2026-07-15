@@ -1,0 +1,28 @@
+{
+  "id": "cee31e2f-7791-4e79-ab64-fbffcb7267a0",
+  "object": "chat.completion",
+  "created": 1784124097,
+  "model": "deepseek-v4-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"schema\": \"criterion_assessment.v1-microtest\",\n  \"criteria\": [\n    {\n      \"id\": \"I1_PROMPT_TECHNIQUE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"What Makes Chain-of-Thought Prompting Effective? A Counterfactual Study\"}\n      ],\n      \"reason\": \"The title explicitly names chain-of-thought prompting, which is a concrete prompt-engineering operation (a way to structure prompts with intermediate reasoning steps).\"\n    },\n    {\n      \"id\": \"I2_REPRODUCIBLE\",\n      \"status\": \"unclear\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"What Makes Chain-of-Thought Prompting Effective? A Counterfactual Study\"}\n      ],\n      \"reason\": \"The title mentions a study on chain-of-thought prompting, but does not describe a specific transferable technique or structure beyond the named method. It is unclear whether the abstract would provide such detail.\"\n    },\n    {\n      \"id\": \"I3_LLM_TARGET\",\n      \"status\": \"unclear\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"What Makes Chain-of-Thought Prompting Effective? A Counterfactual Study\"}\n      ],\n      \"reason\": \"Chain-of-thought prompting is typically applied to LLMs, but the title does not explicitly state that the technique targets LLMs.\"\n    },\n    {\n      \"id\": \"I4_PRACTITIONER\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"Chain-of-Thought Prompting\"}\n      ],\n      \"reason\": \"Chain-of-thought prompting is a practitioner-applicable technique that does not require training or fine-tuning of model weights.\"\n    },\n    {\n      \"id\": \"E1_NO_ACTIONABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"Chain-of-Thought Prompting\"}\n      ],\n      \"reason\": \"The title describes chain-of-thought prompting, which is an actionable prompt technique.\"\n    },\n    {\n      \"id\": \"E2_MODEL_TRAINING_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"Chain-of-Thought Prompting\"}\n      ],\n      \"reason\": \"The title focuses on prompting, not model training or fine-tuning.\"\n    },\n    {\n      \"id\": \"E3_BENCHMARK_ONLY\",\n      \"status\": \"unclear\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"A Counterfactual Study\"}\n      ],\n      \"reason\": \"The title suggests a study, possibly a benchmark or evaluation, but it is unclear whether it describes a transferable prompt method beyond the named technique.\"\n    },\n    {\n      \"id\": \"E4_APPLICATION_WITHOUT_PROMPT_DETAIL\",\n      \"status\": \"unclear\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"What Makes Chain-of-Thought Prompting Effective?\"}\n      ],\n      \"reason\": \"The title indicates an investigation into chain-of-thought prompting, but it is unclear whether the abstract provides actionable detail or just analysis.\"\n    },\n    {\n      \"id\": \"E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"Chain-of-Thought Prompting\"}\n      ],\n      \"reason\": \"The title suggests a primary study (counterfactual study) and names an isolable technique (chain-of-thought prompting).\"\n    }\n  ]\n}"
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1514,
+    "completion_tokens": 802,
+    "total_tokens": 2316,
+    "prompt_tokens_details": {
+      "cached_tokens": 1408
+    },
+    "prompt_cache_hit_tokens": 1408,
+    "prompt_cache_miss_tokens": 106
+  },
+  "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402"
+}

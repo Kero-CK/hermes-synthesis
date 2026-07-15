@@ -1,0 +1,28 @@
+{
+  "id": "f21c91c4-d067-4b6f-8652-acd628f19967",
+  "object": "chat.completion",
+  "created": 1784124072,
+  "model": "deepseek-v4-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"schema\": \"criterion_assessment.v1-microtest\",\n  \"criteria\": [\n    {\n      \"id\": \"I1_PROMPT_TECHNIQUE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S2\", \"quote\": \"we employ a counterfactual prompting approach, systematically manipulating elements of examples used in a few-shot prompt, and testing the consequences on model behavior.\"}\n      ],\n      \"reason\": \"The article describes a concrete prompt-engineering operation: systematically manipulating elements of examples in a few-shot prompt.\"\n    },\n    {\n      \"id\": \"I2_REPRODUCIBLE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S2\", \"quote\": \"systematically manipulating elements of examples used in a few-shot prompt\"},\n        {\"source\": \"S3\", \"quote\": \"understand the relative contributions of prompt elements such as symbols (digits, entities) and patterns (equations, sentence structure) on in-context learning.\"}\n      ],\n      \"reason\": \"The article exposes an identifiable procedure (counterfactual manipulation of prompt elements) that a reader could reproduce.\"\n    },\n    {\n      \"id\": \"I3_LLM_TARGET\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S4\", \"quote\": \"Our experiments with three different large language models (LLMs)\"}\n      ],\n      \"reason\": \"The technique targets large language models.\"\n    },\n    {\n      \"id\": \"I4_PRACTITIONER\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S2\", \"quote\": \"systematically manipulating elements of examples used in a few-shot prompt\"}\n      ],\n      \"reason\": \"The technique involves manipulating prompt examples, which is applicable by a practitioner without training model weights.\"\n    },\n    {\n      \"id\": \"E1_NO_ACTIONABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S2\", \"quote\": \"we employ a counterfactual prompting approach, systematically manipulating elements of examples used in a few-shot prompt\"}\n      ],\n      \"reason\": \"The article proposes an actionable prompt technique (counterfactual manipulation of prompt elements).\"\n    },\n    {\n      \"id\": \"E2_MODEL_TRAINING_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S2\", \"quote\": \"systematically manipulating elements of examples used in a few-shot prompt\"}\n      ],\n      \"reason\": \"The article focuses on prompt manipulation, not model training or fine-tuning.\"\n    },\n    {\n      \"id\": \"E3_BENCHMARK_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S2\", \"quote\": \"we employ a counterfactual prompting approach, systematically manipulating elements of examples used in a few-shot prompt\"}\n      ],\n      \"reason\": \"The article describes a transferable prompt method (counterfactual prompting), not just a benchmark or evaluation.\"\n    },\n    {\n      \"id\": \"E4_APPLICATION_WITHOUT_PROMPT_DETAIL\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S2\", \"quote\": \"systematically manipulating elements of examples used in a few-shot prompt\"},\n        {\"source\": \"S3\", \"quote\": \"understand the relative contributions of prompt elements such as symbols (digits, entities) and patterns (equations, sentence structure)\"}\n      ],\n      \"reason\": \"The article describes the prompt method in actionable detail.\"\n    },\n    {\n      \"id\": \"E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S2\", \"quote\": \"we employ a counterfactual prompting approach, systematically manipulating elements of examples used in a few-shot prompt\"}\n      ],\n      \"reason\": \"The article is a primary research article that exposes an isolable and actionable prompt technique.\"\n    }\n  ]\n}"
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1811,
+    "completion_tokens": 875,
+    "total_tokens": 2686,
+    "prompt_tokens_details": {
+      "cached_tokens": 1792
+    },
+    "prompt_cache_hit_tokens": 1792,
+    "prompt_cache_miss_tokens": 19
+  },
+  "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402"
+}

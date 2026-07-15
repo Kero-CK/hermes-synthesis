@@ -1,0 +1,28 @@
+{
+  "id": "9dadd1ef-e822-4635-9ff6-633987eaf1fd",
+  "object": "chat.completion",
+  "created": 1784124051,
+  "model": "deepseek-v4-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"schema\": \"criterion_assessment.v1-microtest\",\n  \"criteria\": [\n    {\n      \"id\": \"I1_PROMPT_TECHNIQUE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we propose a novel chain of thought prompt tuning for vision-language modeling\"}\n      ],\n      \"reason\": \"The article proposes a concrete prompt-engineering operation: chain of thought prompt tuning, which is a method to structure prompts.\"\n    },\n    {\n      \"id\": \"I2_REPRODUCIBLE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we propose a novel chain of thought prompt tuning for vision-language modeling\"},\n        {\"source\": \"S8\", \"quote\": \"We will release our codes\"}\n      ],\n      \"reason\": \"The method is described as a transferable technique (chain of thought prompt tuning) and code release is promised, enabling reproducibility.\"\n    },\n    {\n      \"id\": \"I3_LLM_TARGET\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"Chain of Thought Prompt Tuning in Vision Language Models\"},\n        {\"source\": \"S1\", \"quote\": \"Language-Image Pre-training has demonstrated promising results on zero-shot and few-shot downstream tasks by prompting visual models with natural language prompts\"}\n      ],\n      \"reason\": \"The technique targets vision-language models, which are large language models extended to vision.\"\n    },\n    {\n      \"id\": \"I4_PRACTITIONER\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we propose a novel chain of thought prompt tuning for vision-language modeling\"}\n      ],\n      \"reason\": \"Chain of thought prompt tuning is a prompting technique applicable by practitioners without training model weights.\"\n    },\n    {\n      \"id\": \"E1_NO_ACTIONABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we propose a novel chain of thought prompt tuning for vision-language modeling\"}\n      ],\n      \"reason\": \"The article proposes an actionable prompt technique (chain of thought prompt tuning).\"\n    },\n    {\n      \"id\": \"E2_MODEL_TRAINING_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we propose a novel chain of thought prompt tuning for vision-language modeling\"}\n      ],\n      \"reason\": \"The article focuses on prompt tuning, not solely on model training or architecture.\"\n    },\n    {\n      \"id\": \"E3_BENCHMARK_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we propose a novel chain of thought prompt tuning for vision-language modeling\"}\n      ],\n      \"reason\": \"The article proposes a method, not just a benchmark or evaluation.\"\n    },\n    {\n      \"id\": \"E4_APPLICATION_WITHOUT_PROMPT_DETAIL\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we propose a novel chain of thought prompt tuning for vision-language modeling\"}\n      ],\n      \"reason\": \"The article describes the prompt method (chain of thought prompt tuning) in actionable detail.\"\n    },\n    {\n      \"id\": \"E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S5\", \"quote\": \"we propose a novel chain of thought prompt tuning for vision-language modeling\"}\n      ],\n      \"reason\": \"The article is a primary research article proposing an isolable technique.\"\n    }\n  ]\n}"
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1757,
+    "completion_tokens": 822,
+    "total_tokens": 2579,
+    "prompt_tokens_details": {
+      "cached_tokens": 1664
+    },
+    "prompt_cache_hit_tokens": 1664,
+    "prompt_cache_miss_tokens": 93
+  },
+  "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402"
+}

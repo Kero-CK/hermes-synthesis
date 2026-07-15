@@ -1,0 +1,28 @@
+{
+  "id": "508f0aec-ecda-40af-b0c8-478065b175fe",
+  "object": "chat.completion",
+  "created": 1784124134,
+  "model": "deepseek-v4-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"schema\": \"criterion_assessment.v1-microtest\",\n  \"criteria\": [\n    {\n      \"id\": \"I1_PROMPT_TECHNIQUE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S10\", \"quote\": \"We propose an automatic CoT prompting method: Auto-CoT.\"},\n        {\"source\": \"S11\", \"quote\": \"It samples questions with diversity and generates reasoning chains to construct demonstrations.\"}\n      ],\n      \"reason\": \"The article describes a concrete prompt-engineering operation: Auto-CoT, which automatically constructs chain-of-thought demonstrations by sampling diverse questions and generating reasoning chains.\"\n    },\n    {\n      \"id\": \"I2_REPRODUCIBLE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S10\", \"quote\": \"We propose an automatic CoT prompting method: Auto-CoT.\"},\n        {\"source\": \"S11\", \"quote\": \"It samples questions with diversity and generates reasoning chains to construct demonstrations.\"}\n      ],\n      \"reason\": \"The method Auto-CoT is described as a transferable procedure: sampling diverse questions and generating reasoning chains to construct demonstrations, which a reader could reproduce.\"\n    },\n    {\n      \"id\": \"I3_LLM_TARGET\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S1\", \"quote\": \"Large language models (LLMs) can perform complex reasoning by generating intermediate reasoning steps.\"},\n        {\"source\": \"S12\", \"quote\": \"On ten public benchmark reasoning tasks with GPT-3, Auto-CoT consistently matches or exceeds the performance of the CoT paradigm that requires manual designs of demonstrations.\"}\n      ],\n      \"reason\": \"The technique targets large language models, specifically GPT-3, as stated in the abstract.\"\n    },\n    {\n      \"id\": \"I4_PRACTITIONER\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"S10\", \"quote\": \"We propose an automatic CoT prompting method: Auto-CoT.\"},\n        {\"source\": \"S11\", \"quote\": \"It samples questions with diversity and generates reasoning chains to construct demonstrations.\"}\n      ],\n      \"reason\": \"Auto-CoT is a prompting method that constructs demonstrations automatically, without requiring training or fine-tuning of model weights. It is applicable by a practitioner through prompts and context.\"\n    },\n    {\n      \"id\": \"E1_NO_ACTIONABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S10\", \"quote\": \"We propose an automatic CoT prompting method: Auto-CoT.\"}\n      ],\n      \"reason\": \"The article proposes an actionable prompt technique (Auto-CoT), so this exclusion does not apply.\"\n    },\n    {\n      \"id\": \"E2_MODEL_TRAINING_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S10\", \"quote\": \"We propose an automatic CoT prompting method: Auto-CoT.\"}\n      ],\n      \"reason\": \"The article is about a prompting method, not about model architecture, training, fine-tuning, or learned prompt parameters.\"\n    },\n    {\n      \"id\": \"E3_BENCHMARK_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S10\", \"quote\": \"We propose an automatic CoT prompting method: Auto-CoT.\"}\n      ],\n      \"reason\": \"The article proposes a transferable prompt method (Auto-CoT), not merely a benchmark or evaluation.\"\n    },\n    {\n      \"id\": \"E4_APPLICATION_WITHOUT_PROMPT_DETAIL\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"S10\", \"quote\": \"We propose an automatic CoT prompting method: Auto-CoT.\"},\n        {\"source\": \"S11\", \"quote\": \"It samples questions with diversity and generates reasoning chains to construct demonstrations.\"}\n      ],\n      \"reason\": \"The article describes the prompt method in actionable detail (sampling diverse questions, generating reasoning chains).\"\n    },\n    {\n      \"id\": \"E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"T\", \"quote\": \"Automatic Chain of Thought Prompting in Large Language Models\"}\n      ],\n      \"reason\": \"The article is a primary research paper proposing a technique, not an opinion, editorial, or survey.\"\n    }\n  ]\n}"
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1820,
+    "completion_tokens": 979,
+    "total_tokens": 2799,
+    "prompt_tokens_details": {
+      "cached_tokens": 1792
+    },
+    "prompt_cache_hit_tokens": 1792,
+    "prompt_cache_miss_tokens": 28
+  },
+  "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402"
+}
