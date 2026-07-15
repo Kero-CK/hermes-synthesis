@@ -1,0 +1,113 @@
+{
+  "run_id": "20260715T161454171501Z",
+  "created_at": "2026-07-15T16:14:54.175007+00:00",
+  "temperature": 0.0,
+  "models": [
+    "deepseek-reasoner"
+  ],
+  "prompt_sha256": "eab475df17a7247e8ab9d3ee0648864849a8cf84e1d437147531d5267a633698",
+  "criteria_sha256": "41ddfe013dd6e662c01b7297de76088924e3bbab0b5dd1248dffdb50b8f7ca21",
+  "assessment_schema": "criterion_assessment.v1-microtest",
+  "phase1_auto_excludable": [],
+  "review_dir": "C:\\Users\\cedri\\Documents\\Work\\Obsidian\\Hermes\\Projets\\Hermes Synthesis\\Reviews\\hometest-prompteng",
+  "dry_run": false,
+  "git_commit": "b730ab71eafc9d446b58b64ec448912c94f58d7d",
+  "matcher_spec": [
+    "NFKC",
+    "casefold",
+    "replace U+2019 and U+2018 with ASCII apostrophe (')",
+    "replace U+201C and U+201D with ASCII double quote (\")",
+    "replace \\% with %, \\& with &, \\_ with _, and \\# with #",
+    "replace ~ with an ASCII space",
+    "collapse whitespace runs to one ASCII space",
+    "strip leading and trailing whitespace"
+  ],
+  "sentence_segmentation_regex": "(?<=[.!?])\\s+(?=[A-Z<])",
+  "sentence_segmentation_abbreviation_guard": "do not split when the text immediately before the boundary ends with \\b(?:i\\.e\\.|e\\.g\\.|etc\\.)$ (case-insensitive)",
+  "coherence_rules": [
+    "E1_NO_ACTIONABLE_TECHNIQUE=met requires I1_PROMPT_TECHNIQUE in {not_met, not_reported}",
+    "E3_BENCHMARK_ONLY=met requires I2_REPRODUCIBLE in {not_met, not_reported}",
+    "E4_APPLICATION_WITHOUT_PROMPT_DETAIL=met requires I2_REPRODUCIBLE in {not_met, not_reported}",
+    "E2_MODEL_TRAINING_ONLY=met requires I4_PRACTITIONER != met",
+    "I4_PRACTITIONER=met requires I1_PROMPT_TECHNIQUE != not_met"
+  ],
+  "holdout_selection_rule": "Read gold_set.csv under --review-dir; exclude DOI values already present in CASE_SPECS; keep only rows with a non-empty abstract; sort by the hexadecimal sha256(doi.lower()) value in ascending order; take the first three rows with label=exclude as holdout_exclude_1..3 and the first three rows with label=include as holdout_include_1..3; set category to holdout_exclude or holdout_include, variant to title_abstract, and both expected_primary and accepted_alternatives to null/empty; record this rule in the manifest before any API call.",
+  "oracle": [],
+  "reference_run": "20260715T135629864224Z",
+  "frozen_prompt_source": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1\\prompt.txt",
+    "sha256": "eab475df17a7247e8ab9d3ee0648864849a8cf84e1d437147531d5267a633698"
+  },
+  "frozen_criteria_source": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1\\criteria.json",
+    "sha256": "41ddfe013dd6e662c01b7297de76088924e3bbab0b5dd1248dffdb50b8f7ca21"
+  },
+  "candidate_criteria": [
+    "E1_NO_ACTIONABLE_TECHNIQUE",
+    "E2_MODEL_TRAINING_ONLY",
+    "E4_APPLICATION_WITHOUT_PROMPT_DETAIL",
+    "E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE",
+    "I1_PROMPT_TECHNIQUE",
+    "I4_PRACTITIONER"
+  ],
+  "candidate_criteria_text": "Critères candidats : E1_NO_ACTIONABLE_TECHNIQUE, E2_MODEL_TRAINING_ONLY, E4_APPLICATION_WITHOUT_PROMPT_DETAIL, E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE, I1_PROMPT_TECHNIQUE, I4_PRACTITIONER. I2_REPRODUCIBLE et E3_BENCHMARK_ONLY sont exclus d'office (phase 2 du micro-test : 0/2 et 1/2 confirmés). L'auto-exclusion depuis un titre seul reste interdite indépendamment de la allowlist.",
+  "disqualification_rules": [
+    "Règle 1 (disqualification mécanique) : un critère candidat X est disqualifié si X apparaît dans les hard_fails d'AU MOINS UN record labellisé include avec assessment valide (zéro validation_error, zéro coherence_error).",
+    "Règle 2 (support minimal) : X doit être un hard-fail sur au moins 3 DOI uniques labellisés exclude avec assessment valide, en cumulant micro-test v1 et calibration (un même DOI présent dans les deux corpus ou sous plusieurs variantes ne compte qu'une fois)."
+  ],
+  "sampling_rule": "Règle 3 (vérification humaine échantillonnée) : pour chaque X encore qualifié, échantillon d'au plus 5 instances de hard-fail sur des records exclude avec assessment valide, hors les 7 DOI du micro-test (déjà vérifiés en phase 2) ; sélection déterministe par tri croissant de sha256(doi_minuscule + \":\" + criterion_id). Exigence : 100 % de CONFIRMÉ sur l'échantillon — un seul REFUSÉ retire X de la allowlist jusqu'au v2.",
+  "alert_rule": "Signal d'alerte (reporté, non disqualifiant) : hard-fails de X sur des records include au sein d'assessments INVALIDES — comptés et listés dans le rapport.",
+  "no_post_observation_changes": "Aucune modification du prompt, des critères, du matcher ou de ces règles après observation des réponses.",
+  "case_count": 40,
+  "case_ids": [
+    "gold_001",
+    "gold_002",
+    "gold_003",
+    "gold_004",
+    "gold_005",
+    "gold_006",
+    "gold_007",
+    "gold_008",
+    "gold_009",
+    "gold_010",
+    "gold_011",
+    "gold_012",
+    "gold_013",
+    "gold_014",
+    "gold_015",
+    "gold_016",
+    "gold_017",
+    "gold_018",
+    "gold_019",
+    "gold_020",
+    "gold_021",
+    "gold_022",
+    "gold_023",
+    "gold_024",
+    "gold_025",
+    "gold_026",
+    "gold_027",
+    "gold_028",
+    "gold_029",
+    "gold_030",
+    "gold_031",
+    "gold_032",
+    "gold_033",
+    "gold_034",
+    "gold_035",
+    "gold_036",
+    "gold_037",
+    "gold_038",
+    "gold_039",
+    "gold_040"
+  ],
+  "messages_path": "user_messages.jsonl",
+  "warnings": [],
+  "notes": [
+    "Calibration consumes every gold_set.csv row in CSV order.",
+    "The v1 holdout_selection_rule is recorded for manifest compatibility but is not applied to calibration.",
+    "The v1 prompt, criteria, matcher, and validation functions are read-only inputs.",
+    "No calibration oracle or acceptance field is produced.",
+    "AUTO_EXCLUDABLE remains empty during measurement."
+  ]
+}
