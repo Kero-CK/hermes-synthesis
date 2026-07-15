@@ -173,6 +173,37 @@ SCORE_CSV_FIELDS = [
     "api_error_flag",
 ]
 
+MIN_COMPLETENESS_RATIO = 0.80
+PARTIAL_SAMPLE_BIAS_WARNING = (
+    "Partial samples can be biased: missing rows are not necessarily random "
+    "(API truncation correlates with abstracts that trigger long reasoning, "
+    "rate limits arrive in bursts, and invalid labels are excluded)."
+)
+
+
+def build_coverage(
+    evaluated: int,
+    total: int,
+    api_errors: int,
+    invalid_labels: int,
+) -> dict:
+    """Décrit la couverture du gold set sans modifier les métriques."""
+    ratio = evaluated / total if total else 0.0
+    hard_failure = evaluated < 5 or ratio < MIN_COMPLETENESS_RATIO
+    partial = evaluated < total
+    status = "failure" if hard_failure else "warning" if partial else "complete"
+    coverage = {
+        "evaluated": evaluated,
+        "total": total,
+        "api_errors": api_errors,
+        "invalid_labels": invalid_labels,
+        "ratio": round(ratio, 4),
+        "status": status,
+    }
+    if partial:
+        coverage["bias_warning"] = PARTIAL_SAMPLE_BIAS_WARNING
+    return coverage
+
 
 def write_calibration_scores(scores_path: str, rows: list[dict]) -> None:
     """Persiste les scores bruts avant tout calcul d'agrégat."""
@@ -483,6 +514,7 @@ def main(rid: str, sampling: dict[str, int], single_stratum: bool = False):
     evaluated_abstract_sources: list[str] = []
     score_rows: list[dict[str, str]] = []
     errors = 0
+    invalid_labels = 0
 
     for i, row in enumerate(gold, 1):
         title = row.get("title", "")
@@ -499,6 +531,7 @@ def main(rid: str, sampling: dict[str, int], single_stratum: bool = False):
         }
 
         if label not in ("include", "exclude"):
+            invalid_labels += 1
             print(f"  ⚠️  Ligne {i}: label invalide '{label}' — ignorée")
             score_rows.append(score_row)
             continue
@@ -539,8 +572,31 @@ def main(rid: str, sampling: dict[str, int], single_stratum: bool = False):
     scores_path = f"{base}/calibration_scores.csv"
     write_calibration_scores(scores_path, score_rows)
 
+    coverage = build_coverage(len(scores), len(gold), errors, invalid_labels)
+    if coverage["status"] != "complete":
+        stream = sys.stderr if coverage["status"] == "failure" else sys.stdout
+        print(
+            f"\n⚠️ PARTIAL SAMPLE: metrics cover {coverage['evaluated']} of "
+            f"{coverage['total']} articles ({coverage['ratio']:.1%}); "
+            f"API errors: {coverage['api_errors']}; "
+            f"invalid labels: {coverage['invalid_labels']}.\n"
+            f"   {PARTIAL_SAMPLE_BIAS_WARNING}",
+            file=stream,
+        )
+
     if len(scores) < 5:
         print(f"\n❌ Pas assez d'évaluations réussies ({len(scores)}). Vérifie la config LLM.", file=sys.stderr)
+        print(f"   📄 Scores bruts conservés : {scores_path}", file=sys.stderr)
+        sys.exit(1)
+
+    if coverage["ratio"] < MIN_COMPLETENESS_RATIO:
+        print(
+            f"\n❌ Calibration interrompue : couverture {coverage['evaluated']} / "
+            f"{coverage['total']} ({coverage['ratio']:.1%}) sous le seuil dur "
+            f"de {MIN_COMPLETENESS_RATIO:.0%}. Aucun calibration.json n'a été écrit.",
+            file=sys.stderr,
+        )
+        print(f"   📄 Scores bruts conservés : {scores_path}", file=sys.stderr)
         sys.exit(1)
 
     # Métriques avec seuils par défaut
@@ -566,6 +622,7 @@ def main(rid: str, sampling: dict[str, int], single_stratum: bool = False):
     calibration = {
         "n_samples": len(scores),
         "n_errors": errors,
+        "coverage": coverage,
         "single_stratum": single_stratum,
         "default_thresholds": {"include": 0.75, "exclude": 0.25},
         "sampling": {

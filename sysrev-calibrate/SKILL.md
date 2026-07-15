@@ -67,6 +67,26 @@ et spécifiques à ta discipline.
 
 4. Présente les résultats et les seuils recommandés.
 
+## Couverture et erreurs API
+
+`calibration_scores.csv` est écrit avant tout calcul d'agrégat. Il conserve une
+ligne par article et `api_error_flag`, afin que la couverture soit toujours
+auditable même si la calibration est interrompue.
+
+La couverture minimale stricte est de 80 % des lignes du gold set, avec le
+garde-fou absolu existant de 5 évaluations réussies. Sous 80 %, le script
+échoue avec un code non nul, affiche le chemin du CSV brut et n'écrit pas
+`calibration.json`. À partir de 80 % mais avant 100 %, il continue avec un
+avertissement explicite dans le terminal et un bloc `coverage` dans
+`calibration.json`.
+
+Un échantillon partiel peut être biaisé, pas seulement plus petit : les lignes
+manquantes ne sont pas nécessairement aléatoires. Les troncatures API sont
+corrélées aux abstracts qui déclenchent un raisonnement long, les rate limits
+arrivent par rafales, et les labels invalides sont exclus. Les métriques d'un
+sous-ensemble ne doivent donc jamais être présentées comme représentatives
+sans cette alerte de couverture.
+
 # Métriques calculées
 
 | Métrique | Interprétation |
@@ -120,6 +140,16 @@ conservatrice.
 ```json
 {
   "n_samples": 47,
+  "n_errors": 3,
+  "coverage": {
+    "evaluated": 47,
+    "total": 50,
+    "api_errors": 3,
+    "invalid_labels": 0,
+    "ratio": 0.94,
+    "status": "warning",
+    "bias_warning": "Missing rows are not necessarily random; the remaining sample may be biased."
+  },
   "sampling": {"parameters": {"N_A": 13, "N_B": 1226, "n_A": 13, "n_B": 75}, "weights": {"A": 1.0, "B": 16.346667}},
   "default_metrics": {
     "raw": {"recall": 0.91, "precision": 0.83, "f1": 0.87, "cohens_kappa": 0.71},
