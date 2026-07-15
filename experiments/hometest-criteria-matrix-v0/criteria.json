@@ -1,0 +1,71 @@
+{
+  "schema": "screening_criteria.v0-microtest",
+  "criteria": [
+    {
+      "id": "I1_PROMPT_TECHNIQUE",
+      "kind": "inclusion",
+      "evaluator": "llm",
+      "text": "The article describes or proposes at least one concrete prompt-engineering operation: a way to construct, structure, sequence, transform, verify, or constrain prompts or model outputs. Merely using an LLM, evaluating an LLM, or naming a prompting family does not by itself satisfy this criterion."
+    },
+    {
+      "id": "I2_REPRODUCIBLE",
+      "kind": "inclusion",
+      "evaluator": "llm",
+      "text": "The title or abstract exposes an identifiable prompt structure, instruction, sequence, procedure, or transferable method that a reader could reproduce or operationalize. Reporting only comparative performance of named prompting methods, without describing a transferable technique or structure, does not satisfy this criterion."
+    },
+    {
+      "id": "I3_LLM_TARGET",
+      "kind": "inclusion",
+      "evaluator": "llm",
+      "text": "The technique targets large language models or agents whose behavior is based on large language models."
+    },
+    {
+      "id": "I4_PRACTITIONER",
+      "kind": "inclusion",
+      "evaluator": "llm",
+      "text": "The technique is applicable by a practitioner through prompts, instructions, context, inference-time orchestration, or output constraints, without requiring the practitioner to train or fine-tune model weights or learned prompt parameters."
+    },
+    {
+      "id": "I5_ENGLISH",
+      "kind": "inclusion",
+      "evaluator": "metadata",
+      "text": "The article is in English."
+    },
+    {
+      "id": "I6_AFTER_2020",
+      "kind": "inclusion",
+      "evaluator": "metadata",
+      "text": "The article was published after 2020."
+    },
+    {
+      "id": "E1_NO_ACTIONABLE_TECHNIQUE",
+      "kind": "exclusion",
+      "evaluator": "llm",
+      "text": "The article discusses LLMs or agents but does not propose or describe an actionable prompt technique."
+    },
+    {
+      "id": "E2_MODEL_TRAINING_ONLY",
+      "kind": "exclusion",
+      "evaluator": "llm",
+      "text": "The article is solely about model architecture, training, fine-tuning, model weights, or learned prompt parameters, without a practitioner-usable prompting component."
+    },
+    {
+      "id": "E3_BENCHMARK_ONLY",
+      "kind": "exclusion",
+      "evaluator": "llm",
+      "text": "The article is a benchmark or model evaluation without a transferable prompt method, prompt structure, or prompting procedure."
+    },
+    {
+      "id": "E4_APPLICATION_WITHOUT_PROMPT_DETAIL",
+      "kind": "exclusion",
+      "evaluator": "llm",
+      "text": "The article reports a domain application of an LLM without describing the prompt method in actionable detail."
+    },
+    {
+      "id": "E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE",
+      "kind": "exclusion",
+      "evaluator": "llm",
+      "text": "The article is an opinion, editorial, or survey that does not expose at least one isolable and actionable prompt technique. A survey can avoid this exclusion when its title or abstract actually identifies transferable techniques or structures."
+    }
+  ]
+}

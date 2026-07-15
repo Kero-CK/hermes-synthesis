@@ -1,0 +1,28 @@
+{
+  "id": "cebbbefb-2250-41a2-82c8-123507c671e6",
+  "object": "chat.completion",
+  "created": 1784111826,
+  "model": "deepseek-v4-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"schema\": \"criterion_assessment.v0-microtest\",\n  \"criteria\": [\n    {\n      \"id\": \"I1_PROMPT_TECHNIQUE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"abstract\", \"quote\": \"These tasks were evaluated using three prompting techniques: Zero-Shot, Few-Shot, and Chain-of-Thought (CoT).\"}\n      ],\n      \"reason\": \"The abstract explicitly names three concrete prompt-engineering operations (Zero-Shot, Few-Shot, Chain-of-Thought) as techniques used to construct prompts.\"\n    },\n    {\n      \"id\": \"I2_REPRODUCIBLE\",\n      \"status\": \"unclear\",\n      \"evidence\": [\n        {\"source\": \"abstract\", \"quote\": \"For transparency and reproducibility, all methodologies and code from this study are available on our GitHub repository: https://github.com/zabir-nabil/bangla-multilingual-llm-eval\"}\n      ],\n      \"reason\": \"The abstract mentions reproducibility via a GitHub repository but does not describe the prompt structure, instruction, sequence, or procedure in sufficient detail to be reproduced from the title/abstract alone.\"\n    },\n    {\n      \"id\": \"I3_LLM_TARGET\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"title\", \"quote\": \"Evaluation of open and closed-source LLMs for low-resource language with zero-shot, few-shot, and chain-of-thought prompting\"},\n        {\"source\": \"abstract\", \"quote\": \"Large Language Models (LLMs)\"}\n      ],\n      \"evidence\": [\n        {\"source\": \"abstract\", \"quote\": \"six prominent LLMs, i.e., three closed-source (GPT-3.5, GPT-4o, Gemini) and three open-source (Aya 101, BLOOM, LLaMA)\"}\n      ],\n      \"reason\": \"The title and abstract explicitly state that the techniques target large language models.\"\n    },\n    {\n      \"id\": \"I4_PRACTITIONER\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\"source\": \"abstract\", \"quote\": \"These tasks were evaluated using three prompting techniques: Zero-Shot, Few-Shot, and Chain-of-Thought (CoT).\"}\n      ],\n      \"reason\": \"The techniques (Zero-Shot, Few-Shot, CoT) are applied via prompts and inference-time orchestration, without requiring training or fine-tuning of model weights.\"\n    },\n    {\n      \"id\": \"E1_NO_ACTIONABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"abstract\", \"quote\": \"These tasks were evaluated using three prompting techniques: Zero-Shot, Few-Shot, and Chain-of-Thought (CoT).\"}\n      ],\n      \"reason\": \"The article describes actionable prompt techniques (Zero-Shot, Few-Shot, CoT), so it does not lack an actionable technique.\"\n    },\n    {\n      \"id\": \"E2_MODEL_TRAINING_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"abstract\", \"quote\": \"These tasks were evaluated using three prompting techniques: Zero-Shot, Few-Shot, and Chain-of-Thought (CoT).\"}\n      ],\n      \"reason\": \"The article includes a practitioner-usable prompting component (prompting techniques), not solely model training or fine-tuning.\"\n    },\n    {\n      \"id\": \"E3_BENCHMARK_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"abstract\", \"quote\": \"These tasks were evaluated using three prompting techniques: Zero-Shot, Few-Shot, and Chain-of-Thought (CoT).\"}\n      ],\n      \"reason\": \"The article describes transferable prompt methods (Zero-Shot, Few-Shot, CoT), not just a benchmark or evaluation without a prompt method.\"\n    },\n    {\n      \"id\": \"E4_APPLICATION_WITHOUT_PROMPT_DETAIL\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"abstract\", \"quote\": \"These tasks were evaluated using three prompting techniques: Zero-Shot, Few-Shot, and Chain-of-Thought (CoT).\"}\n      ],\n      \"reason\": \"The article names specific prompting techniques, providing some detail about the prompt method, so it is not without actionable detail.\"\n    },\n    {\n      \"id\": \"E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\"source\": \"abstract\", \"quote\": \"This study offers a comprehensive evaluation ... using three prompting techniques: Zero-Shot, Few-Shot, and Chain-of-Thought (CoT).\"}\n      ],\n      \"reason\": \"The article is a primary study (evaluation) that identifies isolable prompt techniques (Zero-Shot, Few-Shot, CoT), so it is not an opinion, editorial, or survey without such techniques.\"\n    }\n  ]\n}"
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1610,
+    "completion_tokens": 1081,
+    "total_tokens": 2691,
+    "prompt_tokens_details": {
+      "cached_tokens": 1536
+    },
+    "prompt_cache_hit_tokens": 1536,
+    "prompt_cache_miss_tokens": 74
+  },
+  "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402"
+}

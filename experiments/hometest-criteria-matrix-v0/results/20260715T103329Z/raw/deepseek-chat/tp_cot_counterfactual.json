@@ -1,0 +1,28 @@
+{
+  "id": "0acd8e9b-3c4a-4774-be95-432b61cada0c",
+  "object": "chat.completion",
+  "created": 1784111821,
+  "model": "deepseek-v4-flash",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"schema\": \"criterion_assessment.v0-microtest\",\n  \"criteria\": [\n    {\n      \"id\": \"I1_PROMPT_TECHNIQUE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\n          \"source\": \"abstract\",\n          \"quote\": \"we employ a counterfactual prompting approach, systematically manipulating elements of examples used in a few-shot prompt\"\n        }\n      ],\n      \"reason\": \"The article describes a concrete prompt-engineering operation: counterfactual prompting, which involves manipulating prompt elements to study their effects.\"\n    },\n    {\n      \"id\": \"I2_REPRODUCIBLE\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\n          \"source\": \"abstract\",\n          \"quote\": \"systematically manipulating elements of examples used in a few-shot prompt\"\n        }\n      ],\n      \"reason\": \"The method of counterfactual prompting is described as a systematic manipulation of prompt elements, which is a transferable procedure that could be reproduced.\"\n    },\n    {\n      \"id\": \"I3_LLM_TARGET\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\n          \"source\": \"abstract\",\n          \"quote\": \"three different large language models (LLMs)\"\n        }\n      ],\n      \"reason\": \"The technique targets large language models, as explicitly stated.\"\n    },\n    {\n      \"id\": \"I4_PRACTITIONER\",\n      \"status\": \"met\",\n      \"evidence\": [\n        {\n          \"source\": \"abstract\",\n          \"quote\": \"counterfactual prompting approach, systematically manipulating elements of examples used in a few-shot prompt\"\n        }\n      ],\n      \"reason\": \"The technique involves manipulating prompts and examples, which is applicable by a practitioner without training or fine-tuning model weights.\"\n    },\n    {\n      \"id\": \"E1_NO_ACTIONABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\n          \"source\": \"abstract\",\n          \"quote\": \"counterfactual prompting approach, systematically manipulating elements of examples used in a few-shot prompt\"\n        }\n      ],\n      \"reason\": \"The article proposes an actionable prompt technique (counterfactual prompting) rather than merely discussing LLMs without a technique.\"\n    },\n    {\n      \"id\": \"E2_MODEL_TRAINING_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\n          \"source\": \"abstract\",\n          \"quote\": \"counterfactual prompting approach\"\n        }\n      ],\n      \"reason\": \"The article focuses on a prompting technique, not on model architecture, training, or fine-tuning.\"\n    },\n    {\n      \"id\": \"E3_BENCHMARK_ONLY\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\n          \"source\": \"abstract\",\n          \"quote\": \"counterfactual prompting approach, systematically manipulating elements of examples used in a few-shot prompt\"\n        }\n      ],\n      \"reason\": \"The article describes a transferable prompt method (counterfactual prompting) rather than being solely a benchmark or evaluation.\"\n    },\n    {\n      \"id\": \"E4_APPLICATION_WITHOUT_PROMPT_DETAIL\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\n          \"source\": \"abstract\",\n          \"quote\": \"counterfactual prompting approach, systematically manipulating elements of examples used in a few-shot prompt\"\n        }\n      ],\n      \"reason\": \"The article describes the prompt method in actionable detail, not just a domain application without prompt detail.\"\n    },\n    {\n      \"id\": \"E5_NON_PRIMARY_WITHOUT_ISOLABLE_TECHNIQUE\",\n      \"status\": \"not_met\",\n      \"evidence\": [\n        {\n          \"source\": \"abstract\",\n          \"quote\": \"counterfactual prompting approach\"\n        }\n      ],\n      \"reason\": \"The article is a primary research study that exposes an isolable and actionable prompt technique (counterfactual prompting).\"\n    }\n  ]\n}"
+      },
+      "logprobs": null,
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1388,
+    "completion_tokens": 845,
+    "total_tokens": 2233,
+    "prompt_tokens_details": {
+      "cached_tokens": 1280
+    },
+    "prompt_cache_hit_tokens": 1280,
+    "prompt_cache_miss_tokens": 108
+  },
+  "system_fingerprint": "fp_8b330d02d0_prod0820_fp8_kvcache_20260402"
+}
