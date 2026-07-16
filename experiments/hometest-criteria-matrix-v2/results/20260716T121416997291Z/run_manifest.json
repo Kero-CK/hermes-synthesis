@@ -1,0 +1,255 @@
+{
+  "run_id": "20260716T121416997291Z",
+  "created_at": "2026-07-16T12:14:17.000875+00:00",
+  "temperature": 0.0,
+  "models": [
+    "deepseek-reasoner"
+  ],
+  "prompt_sha256": "80651214c445bcdd992ecae07feffbd8dfd981ecf4b075921eadcaff417701f3",
+  "v1_prompt_sha256": "eab475df17a7247e8ab9d3ee0648864849a8cf84e1d437147531d5267a633698",
+  "criteria_sha256": "41ddfe013dd6e662c01b7297de76088924e3bbab0b5dd1248dffdb50b8f7ca21",
+  "assessment_schema": "criterion_assessment.v2-microtest",
+  "v1_assessment_schema": "criterion_assessment.v1-microtest",
+  "phase1_auto_excludable": [],
+  "review_dir": "C:\\Users\\cedri\\Documents\\Work\\Obsidian\\Hermes\\Projets\\Hermes Synthesis\\Reviews\\hometest-prompteng",
+  "dry_run": false,
+  "git_commit": null,
+  "matcher_spec": [
+    "NFKC",
+    "casefold",
+    "replace U+2019 and U+2018 with ASCII apostrophe (')",
+    "replace U+201C and U+201D with ASCII double quote (\")",
+    "replace \\% with %, \\& with &, \\_ with _, and \\# with #",
+    "replace ~ with an ASCII space",
+    "collapse whitespace runs to one ASCII space",
+    "strip leading and trailing whitespace"
+  ],
+  "sentence_segmentation_regex": "(?<=[.!?])\\s+(?=[A-Z<])",
+  "sentence_segmentation_abbreviation_guard": "do not split when the text immediately before the boundary ends with \\b(?:i\\.e\\.|e\\.g\\.|etc\\.)$ (case-insensitive)",
+  "coherence_rules": [
+    "E1_NO_ACTIONABLE_TECHNIQUE=met requires I1_PROMPT_TECHNIQUE in {not_met, not_reported}",
+    "E3_BENCHMARK_ONLY=met requires I2_REPRODUCIBLE in {not_met, not_reported}",
+    "E4_APPLICATION_WITHOUT_PROMPT_DETAIL=met requires I2_REPRODUCIBLE in {not_met, not_reported}",
+    "E2_MODEL_TRAINING_ONLY=met requires I4_PRACTITIONER != met",
+    "I4_PRACTITIONER=met requires I1_PROMPT_TECHNIQUE != not_met"
+  ],
+  "holdout_selection_rule": "Read gold_set.csv under --review-dir; exclude DOI values already present in CASE_SPECS; keep only rows with a non-empty abstract; sort by the hexadecimal sha256(doi.lower()) value in ascending order; take the first three rows with label=exclude as holdout_exclude_1..3 and the first three rows with label=include as holdout_include_1..3; set category to holdout_exclude or holdout_include, variant to title_abstract, and both expected_primary and accepted_alternatives to null/empty; record this rule in the manifest before any API call.",
+  "oracle": [
+    {
+      "case_id": "fp_prompt_tuning",
+      "category": "known_reasoner_false_positive",
+      "expected_primary": "E2_MODEL_TRAINING_ONLY",
+      "accepted_alternatives": [
+        "I4_PRACTITIONER"
+      ]
+    },
+    {
+      "case_id": "fp_agent_planning",
+      "category": "known_reasoner_false_positive",
+      "expected_primary": "I1_PROMPT_TECHNIQUE",
+      "accepted_alternatives": [
+        "E1_NO_ACTIONABLE_TECHNIQUE"
+      ]
+    },
+    {
+      "case_id": "fp_ranking_evaluation",
+      "category": "known_reasoner_false_positive",
+      "expected_primary": "E3_BENCHMARK_ONLY",
+      "accepted_alternatives": [
+        "E1_NO_ACTIONABLE_TECHNIQUE",
+        "E4_APPLICATION_WITHOUT_PROMPT_DETAIL"
+      ]
+    },
+    {
+      "case_id": "tp_cot_counterfactual",
+      "category": "known_chat_low_score_true_positive",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    },
+    {
+      "case_id": "tp_low_resource_prompting",
+      "category": "known_chat_low_score_true_positive",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    },
+    {
+      "case_id": "tp_when_cot_needed",
+      "category": "known_chat_low_score_true_positive",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    },
+    {
+      "case_id": "state_boundary_ai_literacy",
+      "category": "state_coverage_boundary",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    },
+    {
+      "case_id": "state_title_only_true_positive",
+      "category": "state_coverage_title_only_projection",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    },
+    {
+      "case_id": "state_title_only_prompt_tuning",
+      "category": "state_coverage_title_only_projection",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    }
+  ],
+  "reference_run": "20260715T135629864224Z",
+  "frozen_prompt_source": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1\\prompt.txt",
+    "sha256": "eab475df17a7247e8ab9d3ee0648864849a8cf84e1d437147531d5267a633698"
+  },
+  "frozen_criteria_source": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1\\criteria.json",
+    "sha256": "41ddfe013dd6e662c01b7297de76088924e3bbab0b5dd1248dffdb50b8f7ca21"
+  },
+  "frozen_calibration_cases_source": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1-calibration\\results\\20260715T161454171501Z\\cases.jsonl",
+    "sha256": "70dff2678d974883126b480c4b2884ed2b1da059598b3f7f235972e58935b7cf",
+    "run_id": "20260715T161454171501Z"
+  },
+  "blocks": {
+    "A": {
+      "description": "v1 non-regression oracle cases",
+      "case_ids": [
+        "fp_prompt_tuning",
+        "fp_agent_planning",
+        "fp_ranking_evaluation",
+        "tp_cot_counterfactual",
+        "tp_low_resource_prompting",
+        "tp_when_cot_needed",
+        "state_boundary_ai_literacy",
+        "state_title_only_true_positive",
+        "state_title_only_prompt_tuning"
+      ],
+      "count": 9
+    },
+    "B": {
+      "description": "calibration records exposing the v1 evidence disease",
+      "case_ids": [
+        "gold_002",
+        "gold_003",
+        "gold_007",
+        "gold_013",
+        "gold_014",
+        "gold_015",
+        "gold_016",
+        "gold_019",
+        "gold_023",
+        "gold_026",
+        "gold_028",
+        "gold_032",
+        "gold_034"
+      ],
+      "count": 13
+    },
+    "C": {
+      "description": "Rule-3 E4/I4 refusal cases",
+      "case_ids": [
+        "gold_031",
+        "gold_033",
+        "gold_036",
+        "gold_038",
+        "gold_039",
+        "gold_040"
+      ],
+      "count": 6
+    },
+    "D": {
+      "description": "fresh held-out records labelled before the run",
+      "case_ids": [
+        "blocD_001",
+        "blocD_002",
+        "blocD_003",
+        "blocD_004",
+        "blocD_005"
+      ],
+      "count": 5
+    }
+  },
+  "n_replicates": 2,
+  "success_criteria": [
+    {
+      "id": "a",
+      "text": "Zéro erreur « requires evidence » sur l'ensemble du corpus, les deux réplicats. C'est le critère qui définit le v2 : s'il échoue, v2 falsifié."
+    },
+    {
+      "id": "b",
+      "text": "Taux d'assessments invalides ≤ 10 % (v1 calibration : 32,5 %)."
+    },
+    {
+      "id": "c",
+      "text": "Bloc A : les critères (b), (c), (e) du PREREGISTRATION v1 tiennent encore (mêmes oracles). Toute régression = v2 falsifié."
+    },
+    {
+      "id": "d",
+      "text": "Bloc C : E4 ∉ hard_fails sur les 5 cas refusés, dans les deux réplicats ; I4 ∉ hard_fails sur gold_031."
+    },
+    {
+      "id": "e",
+      "text": "Zéro faux hard-fail sur tout cas labellisé include (assessment valide), blocs confondus."
+    },
+    {
+      "id": "f",
+      "text": "Stabilité (mesure, seuil indicatif) : ensembles de hard-fails identiques entre réplicats sur ≥ 90 % des cas. Sous le seuil, v2 n'est pas falsifié mais l'exigence de reproduction avant auto-exclusion devient définitivement obligatoire dans la politique."
+    }
+  ],
+  "blocD": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v2\\blocD.csv",
+    "status": "included",
+    "proposed_dois": [
+      "10.1145/3491102.3517582",
+      "10.2196/50638",
+      "10.48550/arxiv.2304.11556",
+      "10.1109/bigdata59044.2023.10386113",
+      "10.18653/v1/2023.findings-acl.408"
+    ]
+  },
+  "case_count": 33,
+  "case_ids": [
+    "fp_prompt_tuning",
+    "fp_agent_planning",
+    "fp_ranking_evaluation",
+    "tp_cot_counterfactual",
+    "tp_low_resource_prompting",
+    "tp_when_cot_needed",
+    "state_boundary_ai_literacy",
+    "state_title_only_true_positive",
+    "state_title_only_prompt_tuning",
+    "gold_002",
+    "gold_003",
+    "gold_007",
+    "gold_013",
+    "gold_014",
+    "gold_015",
+    "gold_016",
+    "gold_019",
+    "gold_023",
+    "gold_026",
+    "gold_028",
+    "gold_032",
+    "gold_034",
+    "gold_031",
+    "gold_033",
+    "gold_036",
+    "gold_038",
+    "gold_039",
+    "gold_040",
+    "blocD_001",
+    "blocD_002",
+    "blocD_003",
+    "blocD_004",
+    "blocD_005"
+  ],
+  "messages_path": "user_messages.jsonl",
+  "warnings": [],
+  "notes": [
+    "Block A is rebuilt from CASE_SPECS and the review directory; blocks B and C are copied from the frozen v1 calibration cases JSONL.",
+    "Hard-fails are produced by the imported v1 validator/derivation functions; no acceptance field or oracle acceptance is produced.",
+    "git_commit is null because this implementation performs no Git commands.",
+    "A real run refuses to start until blocD.csv contains five non-empty labels."
+  ]
+}
