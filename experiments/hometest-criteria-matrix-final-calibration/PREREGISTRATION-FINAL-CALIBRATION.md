@@ -66,3 +66,17 @@ silently rewritten to the requested identifier.
 `terminal_calibration: true` and `prompt_optimization_closed: true` are
 recorded in every manifest. The v3 result remains a falsified, auditable
 reference; this phase does not authorize a v4 or any later prompt iteration.
+
+## Amendement pré-run — 2026-07-16
+
+Four audit ambiguities are closed before any calibration API call: the Rule-3
+checklist now displays both replicate assessments before one pair-level human
+verdict; the Rule-3 sample is frozen at `RULE3_MAX_SAMPLE = 5` with no
+post-observation size option; offline analysis verifies the byte-identical
+40-case corpus, all manifest anchors, and every 40×2 assessment slot before
+writing a report or checklist; and returned API model identifiers are read
+only from `manifest.response_models`, never inferred from assessment rows.
+
+These are audit-gate corrections only. They change neither the corpus, the
+prompt, the criteria, nor the I1-only assisted policy, and they are completed
+before any terminal calibration call.

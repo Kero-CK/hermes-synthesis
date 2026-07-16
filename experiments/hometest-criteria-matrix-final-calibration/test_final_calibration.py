@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import sys
@@ -73,6 +74,53 @@ class FinalCalibrationTests(unittest.TestCase):
             self._row(case_id, 2, label, second, **kwargs),
         ]
 
+    def _write_result_fixture(
+        self,
+        results: Path,
+        *,
+        response_models: list[str] | None = None,
+        rows: list[dict[str, object]] | None = None,
+        manifest_update: dict[str, object] | None = None,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        integrity = runner.check_final_integrity()
+        results.mkdir(parents=True, exist_ok=True)
+        (results / "assessments").mkdir()
+        (results / "cases.jsonl").write_bytes(integrity["corpus_bytes"])
+        cases = integrity["cases"]
+        if rows is None:
+            rows = [
+                {
+                    "case_id": case["case_id"],
+                    "doi": case["doi"],
+                    "model": runner.REQUESTED_MODEL,
+                    "bloc": "gold_set",
+                    "replicate": replicate,
+                    "variant": case.get("variant", "title_abstract"),
+                    "human_label": case["human_label"],
+                    "validation_errors": [],
+                    "coherence_errors": [],
+                    "hard_fails": [],
+                    "phase1_route": "needs_manual",
+                    "full_assessment": [],
+                }
+                for case in cases
+                for replicate in (1, 2)
+            ]
+        runner.write_jsonl(results / "assessments" / "deepseek-reasoner.jsonl", rows)
+        manifest = runner.build_manifest(
+            argparse.Namespace(dry_run=False),
+            "fixture-run",
+            runner.REQUESTED_MODEL,
+            integrity,
+            cases,
+            "fixture-anchor",
+            response_models or [],
+        )
+        if manifest_update:
+            manifest.update(manifest_update)
+        runner.write_json(results / "run_manifest.json", manifest)
+        return cases, rows
+
     def test_integrity_passes_and_all_tampered_inputs_fail(self) -> None:
         integrity = runner.check_final_integrity()
         self.assertEqual(integrity["corpus_sha256"], runner.EXPECTED_CORPUS_SHA256)
@@ -105,6 +153,85 @@ class FinalCalibrationTests(unittest.TestCase):
             with self.assertRaises(runner.v3_harness.FrozenIntegrityError):
                 runner.check_final_integrity(criteria_path=tampered_criteria)
 
+    def test_offline_integrity_rejects_all_result_gate_tampering(self) -> None:
+        integrity = runner.check_final_integrity()
+        with tempfile.TemporaryDirectory(dir=FINAL_DIR) as temporary:
+            root = Path(temporary)
+
+            altered_corpus = root / "altered-corpus"
+            self._write_result_fixture(altered_corpus)
+            (altered_corpus / "cases.jsonl").write_bytes(
+                integrity["corpus_bytes"] + b"tampered"
+            )
+            with self.assertRaises(analyzer.OfflineIntegrityError):
+                analyzer.load_records(altered_corpus)
+
+            altered_manifest = root / "altered-manifest"
+            self._write_result_fixture(
+                altered_manifest, manifest_update={"prompt_sha256": "0" * 64}
+            )
+            with self.assertRaises(analyzer.OfflineIntegrityError):
+                analyzer.load_records(altered_manifest)
+
+            missing_line = root / "missing-line"
+            _cases, rows = self._write_result_fixture(missing_line)
+            runner.write_jsonl(
+                missing_line / "assessments" / "deepseek-reasoner.jsonl",
+                rows[:-1],
+            )
+            with self.assertRaises(analyzer.OfflineIntegrityError):
+                analyzer.load_records(missing_line)
+
+            duplicate_replicate = root / "duplicate-replicate"
+            _cases, rows = self._write_result_fixture(duplicate_replicate)
+            rows[1]["replicate"] = 1
+            runner.write_jsonl(
+                duplicate_replicate / "assessments" / "deepseek-reasoner.jsonl",
+                rows,
+            )
+            with self.assertRaises(analyzer.OfflineIntegrityError):
+                analyzer.load_records(duplicate_replicate)
+
+            foreign_case = root / "foreign-case"
+            _cases, rows = self._write_result_fixture(foreign_case)
+            rows[0]["case_id"] = "foreign_case_id"
+            runner.write_jsonl(
+                foreign_case / "assessments" / "deepseek-reasoner.jsonl",
+                rows,
+            )
+            with self.assertRaises(analyzer.OfflineIntegrityError):
+                analyzer.load_records(foreign_case)
+
+            for update in ({}, {"terminal_calibration": False}):
+                missing_or_false_flag = root / f"flag-{len(update)}"
+                self._write_result_fixture(
+                    missing_or_false_flag, manifest_update=update
+                )
+                if not update:
+                    manifest_path = missing_or_false_flag / "run_manifest.json"
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest.pop("terminal_calibration")
+                    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                with self.assertRaises(analyzer.OfflineIntegrityError):
+                    analyzer.load_records(missing_or_false_flag)
+
+    def test_technical_error_line_is_analyzable_but_pair_is_not_valid(self) -> None:
+        with tempfile.TemporaryDirectory(dir=FINAL_DIR) as temporary:
+            results = Path(temporary)
+            _cases, rows = self._write_result_fixture(results)
+            rows[0]["technical_error"] = "synthetic timeout"
+            runner.write_jsonl(
+                results / "assessments" / "deepseek-reasoner.jsonl", rows
+            )
+            loaded, _cases, _manifest = analyzer.load_records(results)
+            summary = next(
+                item
+                for item in analyzer.pair_summaries(loaded)
+                if item["case_id"] == rows[0]["case_id"]
+            )
+            self.assertFalse(summary["valid"])
+            self.assertTrue(summary["complete"])
+
     def test_exact_forty_cases_and_eighty_slots(self) -> None:
         _raw, cases = runner.load_frozen_cases()
         self.assertEqual(len(cases), 40)
@@ -129,6 +256,45 @@ class FinalCalibrationTests(unittest.TestCase):
         self.assertEqual(reproduced[("deepseek-reasoner", "same")], {"I1_PROMPT_TECHNIQUE"})
         self.assertEqual(reproduced[("deepseek-reasoner", "flip")], set())
         self.assertEqual(reproduced[("deepseek-reasoner", "one")], set())
+
+    def test_checklist_shows_both_replicates_and_one_pair_verdict(self) -> None:
+        rows = self._pair(
+            "sampled",
+            "exclude",
+            ["I1_PROMPT_TECHNIQUE"],
+            ["I1_PROMPT_TECHNIQUE"],
+        )
+        rows[0]["full_assessment"] = [
+            {
+                "id": "I1_PROMPT_TECHNIQUE",
+                "status": "met",
+                "evidence": [{"source": "S1", "quote": "replicate one quote"}],
+                "reason": "replicate one reason",
+            }
+        ]
+        rows[1]["full_assessment"] = [
+            {
+                "id": "I1_PROMPT_TECHNIQUE",
+                "status": "unclear",
+                "evidence": [{"source": "S2", "quote": "replicate two quote"}],
+                "reason": "replicate two reason",
+            }
+        ]
+        summary = analyzer.pair_summaries(rows)[0]
+        checklist = analyzer.build_human_checklist(
+            Path("synthetic-results"),
+            {
+                "status": "qualified",
+                "rule_3_sample": [summary],
+            },
+        )
+        self.assertIn("### Replicate 1", checklist)
+        self.assertIn("### Replicate 2", checklist)
+        self.assertIn("replicate one quote", checklist)
+        self.assertIn("replicate one reason", checklist)
+        self.assertIn("replicate two quote", checklist)
+        self.assertIn("replicate two reason", checklist)
+        self.assertEqual(checklist.count("Human verdict for pair"), 1)
 
     def test_only_safe_i1_pairs_propose_and_everything_else_is_human(self) -> None:
         rows = self._pair(
@@ -175,7 +341,7 @@ class FinalCalibrationTests(unittest.TestCase):
 
     def test_rules_and_allowlist_guard(self) -> None:
         rows: list[dict[str, object]] = []
-        for index in range(3):
+        for index in range(6):
             rows += self._pair(
                 f"exclude_{index}",
                 "exclude",
@@ -185,8 +351,22 @@ class FinalCalibrationTests(unittest.TestCase):
             )
         qualified = analyzer.apply_terminal_rules(analyzer.pair_summaries(rows))
         self.assertEqual(qualified["status"], "qualified")
-        self.assertEqual(qualified["reproduced_exclude_unique_dois"], 3)
-        self.assertEqual(len(qualified["rule_3_sample"]), 3)
+        self.assertEqual(qualified["reproduced_exclude_unique_dois"], 6)
+        self.assertEqual(len(qualified["rule_3_sample"]), analyzer.RULE3_MAX_SAMPLE)
+        expected_sample = sorted(
+            analyzer.pair_summaries(rows),
+            key=lambda item: (
+                hashlib.sha256(
+                    f"{item['doi']}:{analyzer.I1_CRITERION}".encode("utf-8")
+                ).hexdigest(),
+                item["case_id"],
+            ),
+        )[: analyzer.RULE3_MAX_SAMPLE]
+        self.assertEqual(
+            [item["case_id"] for item in qualified["rule_3_sample"]],
+            [item["case_id"] for item in expected_sample],
+        )
+        self.assertNotIn("--max-human-sample", analyzer.build_parser().format_help())
 
         rows += self._pair(
             "include_hit",
@@ -215,6 +395,19 @@ class FinalCalibrationTests(unittest.TestCase):
         self.assertEqual(manifest["response_models"], ["deepseek-v4-flash"])
         self.assertNotEqual(manifest["requested_model"], manifest["response_models"][0])
 
+    def test_empty_response_models_are_not_inferred_from_assessments(self) -> None:
+        with tempfile.TemporaryDirectory(dir=FINAL_DIR) as temporary:
+            results = Path(temporary)
+            self._write_result_fixture(results, response_models=[])
+            result = analyzer.analyze(results)
+            report = result["report_path"].read_text(encoding="utf-8")
+            expected = (
+                "Returned model identifiers: aucun identifiant de modèle retourné "
+                "n’a été observé (manifest response_models=[])."
+            )
+            self.assertIn(expected, report)
+            self.assertNotIn("Returned model identifiers: `deepseek-reasoner`", report)
+
     def test_dry_run_never_calls_api(self) -> None:
         dryrun_root = runner.FINAL_DIR / "dryrun"
         before = set(dryrun_root.iterdir()) if dryrun_root.is_dir() else set()
@@ -233,63 +426,16 @@ class FinalCalibrationTests(unittest.TestCase):
     def test_offline_analysis_writes_report_and_checklist(self) -> None:
         with tempfile.TemporaryDirectory(dir=FINAL_DIR) as temporary:
             results = Path(temporary)
-            (results / "assessments").mkdir()
-            cases = []
-            rows = []
-            for index in range(1, 4):
-                case_id = f"gold_{index:03d}"
-                doi = f"10.9999/test-{index}"
-                cases.append(
-                    {
-                        "case_id": case_id,
-                        "doi": doi,
-                        "title": f"Test title {index}",
-                        "human_label": "exclude",
-                        "variant": "title_abstract",
-                    }
-                )
-                for replicate in (1, 2):
-                    rows.append(
-                        {
-                            "case_id": case_id,
-                            "doi": doi,
-                            "model": "deepseek-reasoner",
-                            "replicate": replicate,
-                            "variant": "title_abstract",
-                            "human_label": "exclude",
-                            "validation_errors": [],
-                            "coherence_errors": [],
-                            "hard_fails": ["I1_PROMPT_TECHNIQUE"],
-                            "full_assessment": [],
-                        }
-                    )
-            (results / "cases.jsonl").write_text(
-                "".join(json.dumps(case) + "\n" for case in cases), encoding="utf-8"
-            )
-            (results / "assessments" / "deepseek-reasoner.jsonl").write_text(
-                "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
-            )
-            (results / "run_manifest.json").write_text(
-                json.dumps(
-                    {
-                        "case_count": 2,
-                        "requested_model": "deepseek-reasoner",
-                        "response_models": ["deepseek-v4-flash"],
-                        "prompt_sha256": runner.EXPECTED_V3_PROMPT_SHA256,
-                        "criteria_sha256": runner.EXPECTED_CRITERIA_SHA256,
-                        "corpus_sha256": runner.EXPECTED_CORPUS_SHA256,
-                        "anchor_commit": "anchor",
-                    }
-                ),
-                encoding="utf-8",
+            self._write_result_fixture(
+                results, response_models=["deepseek-v4-flash"]
             )
             result = analyzer.analyze(results)
             report = result["report_path"].read_text(encoding="utf-8")
             checklist = result["checklist_path"].read_text(encoding="utf-8")
             self.assertIn("Requested model", report)
-            self.assertIn("Response model identifiers", report)
+            self.assertIn("Returned model identifiers: `deepseek-v4-flash`.", report)
             self.assertIn("pending_human_checklist", report)
-            self.assertIn("Human verdict", checklist)
+            self.assertIn("PENDING HUMAN VALIDATION", checklist)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ V3_REPORT_PATH = (
     / "v3_report.md"
 )
 I1_CRITERION = "I1_PROMPT_TECHNIQUE"
+RULE3_MAX_SAMPLE = 5
 ALLOWED_ALLOWLISTS = (frozenset(), frozenset({I1_CRITERION}))
 TAXONOMY_ORDER = [
     "requires-evidence",
@@ -50,11 +51,18 @@ class PolicyError(ValueError):
     """An allowlist outside the terminal I1-only policy was requested."""
 
 
-def parse_args() -> argparse.Namespace:
+class OfflineIntegrityError(RuntimeError):
+    """The completed-results directory is not the frozen 40×2 contract."""
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("results_dir", type=Path)
-    parser.add_argument("--max-human-sample", type=int, default=5)
-    return parser.parse_args()
+    return parser
+
+
+def parse_args() -> argparse.Namespace:
+    return build_parser().parse_args()
 
 
 def assessment_is_valid(row: dict[str, Any]) -> bool:
@@ -90,25 +98,101 @@ def prepare_rows(
 def load_records(
     results_dir: Path,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]], dict[str, Any]]:
+    integrity = verify_results_integrity(results_dir)
+    return integrity["rows"], integrity["cases"], integrity["manifest"]
+
+
+def verify_results_integrity(results_dir: Path) -> dict[str, Any]:
+    """Fail loudly before report/checklist generation if any frozen gate fails."""
+
     cases_path = results_dir / "cases.jsonl"
     manifest_path = results_dir / "run_manifest.json"
     if not cases_path.is_file():
-        raise RuntimeError(f"cases.jsonl is missing: {cases_path}")
-    cases = {row["case_id"]: row for row in load_jsonl(cases_path)}
+        raise OfflineIntegrityError(f"cases.jsonl is missing: {cases_path}")
+    if not manifest_path.is_file():
+        raise OfflineIntegrityError(f"run_manifest.json is missing: {manifest_path}")
+
+    try:
+        frozen = check_final_integrity(corpus_path=cases_path)
+    except Exception as exc:
+        raise OfflineIntegrityError(f"frozen source integrity failed: {exc}") from exc
+
+    frozen_bytes = frozen["corpus_bytes"]
+    result_bytes = cases_path.read_bytes()
+    if result_bytes != frozen_bytes:
+        raise OfflineIntegrityError("results cases.jsonl is not byte-identical to the frozen corpus")
+    cases_rows = load_jsonl(cases_path)
+    expected_case_ids = [str(case["case_id"]) for case in cases_rows]
+    expected_ids = set(expected_case_ids)
+    if len(cases_rows) != 40 or len(expected_ids) != 40:
+        raise OfflineIntegrityError(
+            f"expected exactly 40 unique cases, got {len(cases_rows)} rows / {len(expected_ids)} IDs"
+        )
+    cases = {row["case_id"]: row for row in cases_rows}
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    required_manifest_values = {
+        "prompt_sha256": EXPECTED_V3_PROMPT_SHA256,
+        "criteria_sha256": EXPECTED_CRITERIA_SHA256,
+        "corpus_sha256": EXPECTED_CORPUS_SHA256,
+        "requested_model": "deepseek-reasoner",
+        "case_count": 40,
+        "n_replicates": 2,
+        "call_count": 80,
+        "expected_call_slots": 80,
+        "terminal_calibration": True,
+        "prompt_optimization_closed": True,
+    }
+    for field, expected in required_manifest_values.items():
+        if manifest.get(field) != expected:
+            raise OfflineIntegrityError(
+                f"manifest {field} mismatch: expected {expected!r}, got {manifest.get(field)!r}"
+            )
+    if not isinstance(manifest.get("response_models"), list):
+        raise OfflineIntegrityError("manifest response_models must be a list")
+
     assessment_paths = sorted((results_dir / "assessments").glob("*.jsonl"))
     if not assessment_paths:
-        raise RuntimeError(f"No assessment JSONL files found under {results_dir}")
-    rows = [
-        item
+        raise OfflineIntegrityError(f"No assessment JSONL files found under {results_dir}")
+    raw_rows = [
+        row
         for path in assessment_paths
-        for item in prepare_rows(load_jsonl(path), cases)
+        for row in load_jsonl(path)
     ]
-    manifest = (
-        json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest_path.is_file()
-        else {}
-    )
-    return rows, cases, manifest
+    if len(raw_rows) != 80:
+        raise OfflineIntegrityError(f"expected exactly 80 assessment lines, got {len(raw_rows)}")
+
+    seen_pairs: set[tuple[str, str]] = set()
+    for row in raw_rows:
+        case_id = str(row.get("case_id", ""))
+        replicate = str(row.get("replicate", ""))
+        if case_id not in expected_ids:
+            raise OfflineIntegrityError(f"foreign or missing case_id in assessment: {case_id!r}")
+        if replicate not in {"1", "2"}:
+            raise OfflineIntegrityError(
+                f"invalid replicate for {case_id}: {row.get('replicate')!r}"
+            )
+        pair = (case_id, replicate)
+        if pair in seen_pairs:
+            raise OfflineIntegrityError(f"duplicate assessment pair: {case_id}/r{replicate}")
+        seen_pairs.add(pair)
+        if str(row.get("model", "")) != manifest["requested_model"]:
+            raise OfflineIntegrityError(
+                f"assessment model mismatch for {case_id}/r{replicate}: "
+                f"expected {manifest['requested_model']!r}, got {row.get('model')!r}"
+            )
+    expected_pairs = {
+        (case_id, replicate)
+        for case_id in expected_ids
+        for replicate in ("1", "2")
+    }
+    if seen_pairs != expected_pairs:
+        missing = sorted(expected_pairs - seen_pairs)
+        foreign = sorted(seen_pairs - expected_pairs)
+        raise OfflineIntegrityError(
+            f"assessment pair coverage mismatch: missing={missing}, foreign={foreign}"
+        )
+    rows = prepare_rows(raw_rows, cases)
+    return {"rows": rows, "cases": cases, "manifest": manifest}
 
 
 def record_doi(row: dict[str, Any]) -> str:
@@ -290,7 +374,7 @@ def simulate_assisted_policy(
     }
 
 
-def apply_terminal_rules(summaries: list[dict[str, Any]], max_sample: int = 5) -> dict[str, Any]:
+def apply_terminal_rules(summaries: list[dict[str, Any]]) -> dict[str, Any]:
     reproduced_i1 = [
         summary
         for summary in summaries
@@ -323,7 +407,7 @@ def apply_terminal_rules(summaries: list[dict[str, Any]], max_sample: int = 5) -
         ),
     ):
         by_doi.setdefault(summary["doi"], summary)
-    sample = list(by_doi.values())[:max_sample] if status == "qualified" else []
+    sample = list(by_doi.values())[:RULE3_MAX_SAMPLE] if status == "qualified" else []
     return {
         "criterion_id": I1_CRITERION,
         "status": status,
@@ -337,11 +421,10 @@ def apply_terminal_rules(summaries: list[dict[str, Any]], max_sample: int = 5) -
     }
 
 
-def criterion_row(summary: dict[str, Any], criterion_id: str) -> dict[str, Any]:
-    for row in summary["rows"]:
-        for item in row.get("full_assessment", []) or []:
-            if isinstance(item, dict) and item.get("id") == criterion_id:
-                return item
+def criterion_row(row: dict[str, Any], criterion_id: str) -> dict[str, Any]:
+    for item in row.get("full_assessment", []) or []:
+        if isinstance(item, dict) and item.get("id") == criterion_id:
+            return item
     return {}
 
 
@@ -365,24 +448,35 @@ def build_human_checklist(
         lines.append("No Rule-3 sample is generated because I1 is not qualified.")
     else:
         for index, summary in enumerate(sample, start=1):
-            assessment = criterion_row(summary, I1_CRITERION)
             lines.extend(
                 [
                     f"## {index}. {summary['case_id']}",
                     "",
                     f"- DOI: `{summary['doi']}`",
                     f"- Title: {summary['case'].get('title', '')}",
-                    f"- Status: `{assessment.get('status', 'unknown')}`",
                 ]
             )
-            for evidence in assessment.get("evidence", []) or []:
-                lines.append(
-                    f"- Citation [{evidence.get('source', '')}] : « {evidence.get('quote', '')} »"
+            for replicate_row in sorted(
+                summary["rows"], key=lambda row: int(str(row.get("replicate", "0")))
+            ):
+                replicate = replicate_row.get("replicate", "?")
+                assessment = criterion_row(replicate_row, I1_CRITERION)
+                lines.extend(
+                    [
+                        "",
+                        f"### Replicate {replicate}",
+                        f"- Status: `{assessment.get('status', 'unknown')}`",
+                    ]
                 )
+                for evidence in assessment.get("evidence", []) or []:
+                    lines.append(
+                        f"- Citation [{evidence.get('source', '')}] : « {evidence.get('quote', '')} »"
+                    )
+                lines.append(f"- Reason: {assessment.get('reason', '')}")
             lines.extend(
                 [
-                    f"- Reason: {assessment.get('reason', '')}",
-                    "- Human verdict: [ ] CONFIRMED  [ ] REFUSED — note:",
+                    "",
+                    "- Human verdict for pair: [ ] CONFIRMED  [ ] REFUSED — note:",
                     "",
                 ]
             )
@@ -397,6 +491,16 @@ def build_human_checklist(
         ]
     )
     return "\n".join(lines)
+
+
+def _legacy_criterion_row(summary: dict[str, Any], criterion_id: str) -> dict[str, Any]:
+    """Compatibility helper for callers that still hold a pair summary."""
+
+    for row in summary["rows"]:
+        for item in row.get("full_assessment", []) or []:
+            if isinstance(item, dict) and item.get("id") == criterion_id:
+                return item
+    return {}
 
 
 def stability_report(summaries: list[dict[str, Any]]) -> dict[str, Any]:
@@ -487,9 +591,18 @@ def render_report(
         for error in all_errors(row):
             taxonomy[error_taxonomy(error)] += 1
     stability = stability_report(summaries)
-    response_models = manifest.get("response_models") or sorted(
-        {row["_model"] for row in rows if row.get("_model")}
-    )
+    response_models = manifest["response_models"]
+    if response_models:
+        response_model_line = (
+            "- Returned model identifiers: "
+            + ", ".join(f"`{item}`" for item in response_models)
+            + "."
+        )
+    else:
+        response_model_line = (
+            "- Returned model identifiers: aucun identifiant de modèle retourné "
+            "n’a été observé (manifest response_models=[])."
+        )
     lines = [
         "# Terminal assisted calibration report",
         "",
@@ -504,7 +617,7 @@ def render_report(
         f"- Assessment lines: {len(rows)}/80.",
         f"- Pair summaries: {len(summaries)}; valid comparable pairs: {stability['valid_comparable_pairs']}.",
         f"- Requested model: `{manifest.get('requested_model', '')}`.",
-        f"- Response model identifiers: {', '.join(f'`{item}`' for item in response_models) or '(none observed)'}.",
+        response_model_line,
         "- Requested and response model identifiers are not conflated.",
         f"- Prompt SHA-256: `{manifest.get('prompt_sha256', '')}`.",
         f"- Criteria SHA-256: `{manifest.get('criteria_sha256', '')}`.",
@@ -607,10 +720,10 @@ def render_report(
     return "\n".join(lines)
 
 
-def analyze(results_dir: Path, max_human_sample: int = 5) -> dict[str, Any]:
+def analyze(results_dir: Path) -> dict[str, Any]:
     rows, cases, manifest = load_records(results_dir)
     summaries = pair_summaries(rows)
-    rules = apply_terminal_rules(summaries, max_human_sample)
+    rules = apply_terminal_rules(summaries)
     simulation = simulate_assisted_policy(summaries)
     checklist_path = results_dir / "phase2_sample_checklist.md"
     checklist_path.write_text(
@@ -633,7 +746,7 @@ def analyze(results_dir: Path, max_human_sample: int = 5) -> dict[str, Any]:
 if __name__ == "__main__":
     try:
         args = parse_args()
-        result = analyze(args.results_dir, args.max_human_sample)
+        result = analyze(args.results_dir)
         print(f"REPORT={result['report_path']}")
         print(f"CHECKLIST={result['checklist_path']}")
         print("ALLOWLIST_FINAL=NEEDS_HUMAN_VALIDATION")
