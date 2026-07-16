@@ -1,0 +1,105 @@
+{
+  "run_id": "20260716T172719095421Z",
+  "created_at": "2026-07-16T17:52:09.670385+00:00",
+  "temperature": 0.0,
+  "requested_model": "deepseek-reasoner",
+  "models": [
+    "deepseek-reasoner"
+  ],
+  "response_models": [
+    "deepseek-v4-flash"
+  ],
+  "prompt_sha256": "b723fbb068da8eefec9d77cfa162d2090ee680676ace3b9b5c1b2614d8c0c047",
+  "criteria_sha256": "41ddfe013dd6e662c01b7297de76088924e3bbab0b5dd1248dffdb50b8f7ca21",
+  "corpus_sha256": "70dff2678d974883126b480c4b2884ed2b1da059598b3f7f235972e58935b7cf",
+  "assessment_schema": "criterion_assessment.v3-microtest",
+  "anchor_commit": "4491e03522e24a0c1e9a6773d3d967928c8a74a6",
+  "git_commit": "4491e03522e24a0c1e9a6773d3d967928c8a74a6",
+  "terminal_calibration": true,
+  "prompt_optimization_closed": true,
+  "policy": {
+    "allowlist": [
+      "I1_PROMPT_TECHNIQUE"
+    ],
+    "reproduction_required": true,
+    "human_validation_required": true,
+    "proposal_route": "needs_human_validation",
+    "final_exclusion_route": "forbidden",
+    "title_only_proposal": false,
+    "other_hard_fail_route": "human"
+  },
+  "corpus_source": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1-calibration\\results\\20260715T161454171501Z\\cases.jsonl",
+  "case_count": 40,
+  "expected_case_count": 40,
+  "n_replicates": 2,
+  "call_count": 80,
+  "expected_call_slots": 80,
+  "case_ids": [
+    "gold_001",
+    "gold_002",
+    "gold_003",
+    "gold_004",
+    "gold_005",
+    "gold_006",
+    "gold_007",
+    "gold_008",
+    "gold_009",
+    "gold_010",
+    "gold_011",
+    "gold_012",
+    "gold_013",
+    "gold_014",
+    "gold_015",
+    "gold_016",
+    "gold_017",
+    "gold_018",
+    "gold_019",
+    "gold_020",
+    "gold_021",
+    "gold_022",
+    "gold_023",
+    "gold_024",
+    "gold_025",
+    "gold_026",
+    "gold_027",
+    "gold_028",
+    "gold_029",
+    "gold_030",
+    "gold_031",
+    "gold_032",
+    "gold_033",
+    "gold_034",
+    "gold_035",
+    "gold_036",
+    "gold_037",
+    "gold_038",
+    "gold_039",
+    "gold_040"
+  ],
+  "messages_path": "user_messages.jsonl",
+  "dry_run": false,
+  "api_calls_made": 80,
+  "completed_assessment_lines": 80,
+  "technical_failure_count": 0,
+  "frozen_sources": {
+    "v3_prompt": {
+      "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v3\\prompt.txt",
+      "sha256": "b723fbb068da8eefec9d77cfa162d2090ee680676ace3b9b5c1b2614d8c0c047"
+    },
+    "v1_criteria": {
+      "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1\\criteria.json",
+      "sha256": "41ddfe013dd6e662c01b7297de76088924e3bbab0b5dd1248dffdb50b8f7ca21"
+    },
+    "corpus": {
+      "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1-calibration\\results\\20260715T161454171501Z\\cases.jsonl",
+      "sha256": "70dff2678d974883126b480c4b2884ed2b1da059598b3f7f235972e58935b7cf"
+    }
+  },
+  "notes": [
+    "The prompt, criteria, matcher, and validator are imported frozen inputs.",
+    "Only I1_PROMPT_TECHNIQUE can create an assisted proposal.",
+    "Every proposal remains needs_human_validation; exclude_final is forbidden.",
+    "Requested and response model identifiers are deliberately separate.",
+    "No final allowlist decision is made before the human checklist."
+  ]
+}
