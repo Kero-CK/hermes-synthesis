@@ -1,0 +1,264 @@
+{
+  "run_id": "20260716T150859285210Z",
+  "created_at": "2026-07-16T15:08:59.290577+00:00",
+  "temperature": 0.0,
+  "models": [
+    "deepseek-reasoner"
+  ],
+  "prompt_sha256": "b723fbb068da8eefec9d77cfa162d2090ee680676ace3b9b5c1b2614d8c0c047",
+  "v1_prompt_sha256": "eab475df17a7247e8ab9d3ee0648864849a8cf84e1d437147531d5267a633698",
+  "v2_prompt_sha256": "80651214c445bcdd992ecae07feffbd8dfd981ecf4b075921eadcaff417701f3",
+  "criteria_sha256": "41ddfe013dd6e662c01b7297de76088924e3bbab0b5dd1248dffdb50b8f7ca21",
+  "assessment_schema": "criterion_assessment.v3-microtest",
+  "v1_assessment_schema": "criterion_assessment.v1-microtest",
+  "phase1_auto_excludable": [],
+  "review_dir": "C:\\Users\\cedri\\Documents\\Work\\Obsidian\\Hermes\\Projets\\Hermes Synthesis\\Reviews\\hometest-prompteng",
+  "dry_run": false,
+  "git_commit": null,
+  "matcher_spec": [
+    "NFKC",
+    "casefold",
+    "replace U+2019 and U+2018 with ASCII apostrophe (')",
+    "replace U+201C and U+201D with ASCII double quote (\")",
+    "replace \\% with %, \\& with &, \\_ with _, and \\# with #",
+    "replace ~ with an ASCII space",
+    "collapse whitespace runs to one ASCII space",
+    "strip leading and trailing whitespace"
+  ],
+  "sentence_segmentation_regex": "(?<=[.!?])\\s+(?=[A-Z<])",
+  "sentence_segmentation_abbreviation_guard": "do not split when the text immediately before the boundary ends with \\b(?:i\\.e\\.|e\\.g\\.|etc\\.)$ (case-insensitive)",
+  "coherence_rules": [
+    "E1_NO_ACTIONABLE_TECHNIQUE=met requires I1_PROMPT_TECHNIQUE in {not_met, not_reported}",
+    "E3_BENCHMARK_ONLY=met requires I2_REPRODUCIBLE in {not_met, not_reported}",
+    "E4_APPLICATION_WITHOUT_PROMPT_DETAIL=met requires I2_REPRODUCIBLE in {not_met, not_reported}",
+    "E2_MODEL_TRAINING_ONLY=met requires I4_PRACTITIONER != met",
+    "I4_PRACTITIONER=met requires I1_PROMPT_TECHNIQUE != not_met"
+  ],
+  "holdout_selection_rule": "Read gold_set.csv under --review-dir; exclude DOI values already present in CASE_SPECS; keep only rows with a non-empty abstract; sort by the hexadecimal sha256(doi.lower()) value in ascending order; take the first three rows with label=exclude as holdout_exclude_1..3 and the first three rows with label=include as holdout_include_1..3; set category to holdout_exclude or holdout_include, variant to title_abstract, and both expected_primary and accepted_alternatives to null/empty; record this rule in the manifest before any API call.",
+  "oracle": [
+    {
+      "case_id": "fp_prompt_tuning",
+      "category": "known_reasoner_false_positive",
+      "expected_primary": "E2_MODEL_TRAINING_ONLY",
+      "accepted_alternatives": [
+        "I4_PRACTITIONER"
+      ]
+    },
+    {
+      "case_id": "fp_agent_planning",
+      "category": "known_reasoner_false_positive",
+      "expected_primary": "I1_PROMPT_TECHNIQUE",
+      "accepted_alternatives": [
+        "E1_NO_ACTIONABLE_TECHNIQUE"
+      ]
+    },
+    {
+      "case_id": "fp_ranking_evaluation",
+      "category": "known_reasoner_false_positive",
+      "expected_primary": "E3_BENCHMARK_ONLY",
+      "accepted_alternatives": [
+        "E1_NO_ACTIONABLE_TECHNIQUE",
+        "E4_APPLICATION_WITHOUT_PROMPT_DETAIL"
+      ]
+    },
+    {
+      "case_id": "tp_cot_counterfactual",
+      "category": "known_chat_low_score_true_positive",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    },
+    {
+      "case_id": "tp_low_resource_prompting",
+      "category": "known_chat_low_score_true_positive",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    },
+    {
+      "case_id": "tp_when_cot_needed",
+      "category": "known_chat_low_score_true_positive",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    },
+    {
+      "case_id": "state_boundary_ai_literacy",
+      "category": "state_coverage_boundary",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    },
+    {
+      "case_id": "state_title_only_true_positive",
+      "category": "state_coverage_title_only_projection",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    },
+    {
+      "case_id": "state_title_only_prompt_tuning",
+      "category": "state_coverage_title_only_projection",
+      "expected_primary": null,
+      "accepted_alternatives": []
+    }
+  ],
+  "reference_run": "20260715T135629864224Z",
+  "v2_reference_run": "20260716T121416997291Z",
+  "frozen_prompt_source": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1\\prompt.txt",
+    "sha256": "eab475df17a7247e8ab9d3ee0648864849a8cf84e1d437147531d5267a633698"
+  },
+  "frozen_criteria_source": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1\\criteria.json",
+    "sha256": "41ddfe013dd6e662c01b7297de76088924e3bbab0b5dd1248dffdb50b8f7ca21"
+  },
+  "frozen_v2_prompt_source": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v2\\prompt.txt",
+    "sha256": "80651214c445bcdd992ecae07feffbd8dfd981ecf4b075921eadcaff417701f3",
+    "manifest": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v2\\results\\20260716T121416997291Z\\run_manifest.json"
+  },
+  "frozen_calibration_cases_source": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v1-calibration\\results\\20260715T161454171501Z\\cases.jsonl",
+    "sha256": "70dff2678d974883126b480c4b2884ed2b1da059598b3f7f235972e58935b7cf",
+    "run_id": "20260715T161454171501Z"
+  },
+  "blocks": {
+    "A": {
+      "description": "v1 non-regression oracle cases; tp_cot_counterfactual is flagged for block-B regression",
+      "case_ids": [
+        "fp_prompt_tuning",
+        "fp_agent_planning",
+        "fp_ranking_evaluation",
+        "tp_cot_counterfactual",
+        "tp_low_resource_prompting",
+        "tp_when_cot_needed",
+        "state_boundary_ai_literacy",
+        "state_title_only_true_positive",
+        "state_title_only_prompt_tuning"
+      ],
+      "count": 9
+    },
+    "B": {
+      "description": "v2 regression cases reloaded from the frozen calibration corpus",
+      "case_ids": [
+        "gold_002",
+        "gold_003",
+        "gold_007",
+        "gold_013",
+        "gold_015",
+        "gold_019",
+        "gold_023",
+        "gold_026",
+        "gold_028",
+        "gold_032",
+        "gold_034",
+        "gold_039"
+      ],
+      "count": 12
+    },
+    "C": {
+      "description": "E4/I4 parasite targets reloaded from the frozen calibration corpus",
+      "case_ids": [
+        "gold_031",
+        "gold_033",
+        "gold_036",
+        "gold_038",
+        "gold_040"
+      ],
+      "count": 5
+    },
+    "D": {
+      "description": "fresh held-out records labelled before the run",
+      "case_ids": [
+        "blocD_001",
+        "blocD_002",
+        "blocD_003",
+        "blocD_004",
+        "blocD_005"
+      ],
+      "count": 5
+    }
+  },
+  "n_replicates": 2,
+  "call_count": 62,
+  "success_criteria": [
+    {
+      "id": "a",
+      "text": "Zéro erreur « requires evidence », les deux réplicats. Échec = v3 falsifié."
+    },
+    {
+      "id": "b",
+      "text": "Zéro erreur d'étiquetage de source (le nouveau message §2.2), les deux réplicats — c'est le critère qui définit le v3. Échec = falsifié."
+    },
+    {
+      "id": "c",
+      "text": "Taux global d'assessments invalides ≤ 10 %."
+    },
+    {
+      "id": "d",
+      "text": "Non-régression bloc A : critères v1 (b), (c), (e) tiennent (mêmes oracles), par réplicat."
+    },
+    {
+      "id": "e",
+      "text": "Hard-fails parasites, sémantique production : sur les cibles E4 (gold_033/036/038/039/040) et I4 (gold_031), aucun hard-fail REPRODUIT dans les deux réplicats. Échec = falsifié."
+    },
+    {
+      "id": "f",
+      "text": "Zéro faux hard-fail reproduit sur tout cas labellisé include, blocs confondus. Échec = falsifié."
+    },
+    {
+      "id": "g",
+      "text": "Stabilité (mesure) : % de paires de réplicats à hard-fails identiques, reporté par bloc ; pas de seuil falsifiant, la politique exige déjà la reproduction."
+    }
+  ],
+  "blocD": {
+    "path": "C:\\Users\\cedri\\hermes-docker\\data\\skills\\sysrev\\experiments\\hometest-criteria-matrix-v3\\blocD.csv",
+    "status": "included",
+    "proposed_dois": [
+      "10.1145/3545945.3569823",
+      "10.18653/v1/2023.acl-long.153",
+      "10.1109/cvpr52729.2023.01438",
+      "10.1038/s41746-025-01475-8",
+      "10.1145/3491101.3503564"
+    ]
+  },
+  "case_count": 31,
+  "case_ids": [
+    "fp_prompt_tuning",
+    "fp_agent_planning",
+    "fp_ranking_evaluation",
+    "tp_cot_counterfactual",
+    "tp_low_resource_prompting",
+    "tp_when_cot_needed",
+    "state_boundary_ai_literacy",
+    "state_title_only_true_positive",
+    "state_title_only_prompt_tuning",
+    "gold_002",
+    "gold_003",
+    "gold_007",
+    "gold_013",
+    "gold_015",
+    "gold_019",
+    "gold_023",
+    "gold_026",
+    "gold_028",
+    "gold_032",
+    "gold_034",
+    "gold_039",
+    "gold_031",
+    "gold_033",
+    "gold_036",
+    "gold_038",
+    "gold_040",
+    "blocD_001",
+    "blocD_002",
+    "blocD_003",
+    "blocD_004",
+    "blocD_005"
+  ],
+  "messages_path": "user_messages.jsonl",
+  "warnings": [],
+  "notes": [
+    "Block A is rebuilt from CASE_SPECS; tp_cot_counterfactual is flagged bloc_b_regression=true and is not duplicated in block B.",
+    "Blocks B and C are copied from the frozen v1 calibration cases JSONL; the bloc field is the only added case field there.",
+    "The v1 validator and derivation functions are imported unchanged; v3 rewrites only quote-source diagnostic messages.",
+    "git_commit is null because this implementation performs no Git commands.",
+    "A real run refuses to start until blocD.csv contains five non-empty labels."
+  ]
+}
