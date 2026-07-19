@@ -42,7 +42,7 @@ KNOWN_JOURNAL_VOCABULARY = {
     "fulltext": {"retrieved", "retrieval_failed", "include", "needs_manual"},
     "screen_fulltext": {"include", "exclude", "needs_manual"},
     "human_review_fulltext": {"include", "exclude"},
-    "extract": {"extracted", "not_found", "api_error", "rejected_citation", "include", "needs_manual"},
+    "extract": {"extracted", "not_found", "api_error", "rejected_citation", "citation_retry", "include", "needs_manual"},
 }
 
 

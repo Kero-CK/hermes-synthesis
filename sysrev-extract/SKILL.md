@@ -97,12 +97,23 @@ doi,variable,valeur,citation,section
 ```
 
 Les échecs documentaires utilisent `not_found` et les échecs techniques
-`api_error`. Une citation absente du texte source normalisé produit
-`rejected_citation` et la valeur CSV `CITATION REJETÉE`. Les quatre états de
-cellule sont : valeur extraite, `NON TROUVÉ`, `ERREUR API` et
-`CITATION REJETÉE`. Les anciens tuples `extract/include` et `extract/needs_manual`
-restent reconnus en lecture comme alias de `extracted` et `not_found`. Tout tuple
-inconnu est signalé et compté dans `manifest["journal_unknown_entries"]`.
+`api_error`. Une citation absente du texte source normalisé déclenche d'abord
+une **passe de retry** (`decision: "citation_retry"` journalisée) : le LLM
+revoit le document avec la citation rejetée et une consigne de copie exacte,
+et propose jusqu'à 3 candidats. Chaque candidat repasse par la MÊME
+vérification verbatim (`citation_is_verifiable`) — le retry ne l'assouplit
+jamais. Premier candidat vérifiable → cellule sauvée (`extracted`, citation
+exacte). Aucun candidat vérifiable, réponse `NON TROUVÉ`, ou API muette →
+`rejected_citation` et la valeur CSV `CITATION REJETÉE`, comme avant. En mode
+mock, aucun retry n'est tenté (comportement historique conservé). Compteurs :
+`manifest["extraction_citation_retries"]` et
+`manifest["extraction_retry_recovered"]`.
+
+Les quatre états de cellule restent : valeur extraite, `NON TROUVÉ`,
+`ERREUR API` et `CITATION REJETÉE`. Les anciens tuples `extract/include` et
+`extract/needs_manual` restent reconnus en lecture comme alias de `extracted`
+et `not_found`. Tout tuple inconnu est signalé et compté dans
+`manifest["journal_unknown_entries"]`.
 
 Limite connue : la normalisation supprime les césures explicites en fin de ligne
 (`inter-\nvention` → `intervention`). Une citation reproduisant la forme césurée
