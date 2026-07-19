@@ -33,6 +33,13 @@ Zotero/Mendeley. Le rapport est structuré pour être quasi publiable
 - `manifest.json` indique `stage = "extract_done"`
 - `extraction.csv` existe avec des données
 - `prisma.json` a tous les compteurs remplis
+- Aucun cas d'éligibilité full-text en attente (`fulltext_review_pending = 0`),
+  sinon le rapport est refusé
+- Le diagramme PRISMA sépare strictement : non-récupérés (accès, stage
+  fulltext) / exclus à l'éligibilité (texte intégral, stage screen_fulltext,
+  avec raisons et critères) / inclus finaux. Le champ historique
+  `excluded_fulltext` n'est plus jamais utilisé comme fallback de
+  non-récupération.
 - `protocol.md` existe
 - le codebook d'extraction est présent et non vide
 - le nombre de cellules dans `extraction.csv` correspond à textes récupérés × variables

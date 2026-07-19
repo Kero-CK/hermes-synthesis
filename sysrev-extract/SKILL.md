@@ -8,7 +8,7 @@ description: >
 inputs:
   - /reviews/<id>/sources/<doi>.md (textes intégraux)
   - /reviews/<id>/protocol.md (codebook d'extraction)
-  - /reviews/<id>/manifest.json (stage = "fulltext_done")
+  - /reviews/<id>/manifest.json (stage = "screen_fulltext_done" ou "review_fulltext_done")
 outputs:
   - /reviews/<id>/extraction.csv (variable | valeur | citation | page)
   - /reviews/<id>/decisions.jsonl (journal d'extraction)
@@ -28,7 +28,8 @@ citation verbatim du texte source.
 
 # Pré-conditions
 
-- `manifest.json` indique `stage = "fulltext_done"`
+- `manifest.json` indique `stage = "screen_fulltext_done"` ou `"review_fulltext_done"` (le stage d'éligibilité full-text `sysrev-screen-fulltext` doit avoir tourné ; à défaut, revue historique : les textes récupérés passent avec un avertissement)
+- Aucun cas d'éligibilité en attente dans `to_review_fulltext.jsonl` (sinon le script refuse)
 - Les textes intégraux sont dans `sources/`
 - `protocol.md` contient le codebook (variables à extraire)
 

@@ -27,9 +27,44 @@ KNOWN_JOURNAL_VOCABULARY = {
     "human_review": {"include", "exclude"},
     "screen_manual": {"include", "exclude"},  # alias historique
     "fulltext": {"retrieved", "retrieval_failed", "include", "needs_manual"},
+    "screen_fulltext": {"include", "exclude", "needs_manual"},
+    "human_review_fulltext": {"include", "exclude"},
     "extract": {"extracted", "not_found", "api_error", "rejected_citation", "include", "needs_manual"},
 }
 HUMAN_SCREEN_STAGES = {"human_review", "screen_manual"}
+
+
+def resolve_fulltext_exclusions(entries: list[dict]) -> list[dict]:
+    """Résout les exclusions FINALES d'éligibilité full-text (humain > machine).
+
+    Retourne, pour chaque article dont la décision finale est exclude,
+    l'entrée de journal qui porte cette décision (avec raison et critère).
+    """
+    machine: dict[str, dict] = {}
+    human: dict[str, dict] = {}
+    order: list[str] = []
+    for entry in entries:
+        stage = entry.get("stage")
+        if stage not in ("screen_fulltext", "human_review_fulltext"):
+            continue
+        if entry.get("decision") not in KNOWN_JOURNAL_VOCABULARY.get(stage, set()):
+            continue
+        raw_doc = entry.get("doc", "")
+        doc = raw_doc.strip() if isinstance(raw_doc, str) else ""
+        if not doc:
+            continue
+        if doc not in machine and doc not in human:
+            order.append(doc)
+        if stage == "human_review_fulltext":
+            human[doc] = entry
+        else:
+            machine[doc] = entry
+    exclusions = []
+    for doc in order:
+        final = human.get(doc) or machine.get(doc)
+        if final and final.get("decision") == "exclude":
+            exclusions.append(final)
+    return exclusions
 
 
 def candidate_identity(candidate: dict) -> tuple[str, str] | None:
@@ -330,15 +365,22 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
                     decisions: list[dict], review_mode: str,
                     candidates: list[dict] | None = None,
                     to_review: list[dict] | None = None,
-                    synthesis: str | None = None) -> str:
+                    synthesis: str | None = None,
+                    fulltext_exclusions: list[dict] | None = None) -> str:
     """Génère un rapport de synthèse structuré. Intègre la synthèse LLM si fournie."""
 
     included = int(prisma.get("included", 0) or 0)
     fulltext_retrieved = recovered_text_count(prisma)
-    fulltext_not_retrieved = max(0, prisma.get(
-        "fulltext_not_retrieved",
-        prisma.get("excluded_fulltext", included - fulltext_retrieved),
-    ))
+    # Non-récupération = limitation d'ACCÈS, jamais une exclusion d'éligibilité.
+    # Le champ historique excluded_fulltext n'est plus utilisé comme fallback.
+    fulltext_not_retrieved = max(0, int(prisma.get(
+        "fulltext_not_retrieved", included - fulltext_retrieved,
+    ) or 0))
+    has_eligibility_stage = "fulltext_screened" in prisma
+    fulltext_screened = int(prisma.get("fulltext_screened", 0) or 0)
+    excluded_eligibility = int(prisma.get("excluded_fulltext_eligibility", 0) or 0)
+    included_final = int(prisma.get("included_final", 0) or 0)
+    fulltext_pending = int(prisma.get("fulltext_review_pending", 0) or 0)
     counts = extraction_counts(extractions)
     articles_submitted = int(prisma.get(
         "extraction_articles", fulltext_retrieved,
@@ -376,6 +418,16 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         f"| **Inclus après screening** | **{prisma.get('included', '?')}** |",
         f"| Textes intégraux récupérés | {fulltext_retrieved} |",
         f"| Non récupérés (limitation d'accès) | {fulltext_not_retrieved} |",
+    ]
+    if has_eligibility_stage:
+        lines.extend([
+            f"| Évalués pour éligibilité (texte intégral) | {fulltext_screened} |",
+            f"| Exclus à l'éligibilité (texte intégral) | {excluded_eligibility} |",
+        ])
+        if fulltext_pending:
+            lines.append(f"| En attente HITL (texte intégral) | {fulltext_pending} |")
+        lines.append(f"| **Inclus (final, après texte intégral)** | **{included_final}** |")
+    lines.extend([
         f"| Articles soumis à l'extraction | {articles_submitted} |",
         f"| Articles avec donnée exploitable | {articles_with_data} |",
         f"| Articles sans donnée exploitable | {articles_without_data} |",
@@ -384,7 +436,15 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         f"| NON TROUVÉ | {counts['not_found']} |",
         f"| Erreurs API | {counts['api_errors']} |",
         f"| Citations rejetées | {counts['rejected_citations']} |",
-    ]
+    ])
+    if not has_eligibility_stage:
+        lines.extend([
+            "",
+            "> ⚠️ **Le stage d'éligibilité full-text n'a pas été exécuté pour "
+            "cette revue.** Les articles inclus sur titre/abstract sont passés "
+            "directement en extraction sans réévaluation sur le texte intégral "
+            "(revue antérieure au stage `sysrev-screen-fulltext`).",
+        ])
     lines.extend([
         "---",
         "",
@@ -452,6 +512,35 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
             lines.append(f"| {title[:80]} | {doc} | {score} | {reason} |")
         lines.append("")
 
+    # --- Exclus à l'éligibilité full-text (avec raisons) ---
+    if fulltext_exclusions:
+        lines.extend([
+            "---",
+            "",
+            "## 📖 Articles exclus à l'éligibilité (texte intégral)",
+            "",
+            "Ces articles avaient passé le screening titre/abstract mais se sont "
+            "révélés hors critères à la lecture du texte intégral. Distinct des "
+            "non-récupérés (limitation d'accès).",
+            "",
+            "| Titre | DOI/ID | Acteur | Critère | Raison |",
+            "|---|---|---|---|---|",
+        ])
+        identity_to_title = {}
+        if candidates:
+            for c in candidates:
+                for _, identity_value in candidate_identity_values(c):
+                    identity_to_title[identity_value] = c.get("title", "?")
+        for d in fulltext_exclusions:
+            identity = row_identity(d)
+            doc = identity[1] if identity is not None else ""
+            title = identity_to_title.get(doc, "?")
+            actor = d.get("actor", "?")
+            criterion = d.get("criterion", "")[:60]
+            reason = d.get("reason", "")[:100]
+            lines.append(f"| {title[:80]} | {doc} | {actor} | {criterion} | {reason} |")
+        lines.append("")
+
     # --- Cas ambigus (HITL) ---
     if to_review:
         lines.extend([
@@ -505,7 +594,7 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         f"- **Modèle screening :** {screening_model} {'(via API)' if llm_configured else '(mock/fallback)'}",
         f"- **Modèle extraction :** {extraction_model} {'(via API)' if llm_configured else '(mock/fallback)'}",
         f"- **Modèle synthèse :** {synthesis_model} {'(via API)' if llm_configured else '(mock/fallback)'}",
-        f"- **Rôle de l'IA :** screening titres/abstracts, extraction verbatim double passe, synthèse bornée",
+        f"- **Rôle de l'IA :** screening titres/abstracts, screening d'éligibilité texte intégral, extraction verbatim double passe, synthèse bornée",
         f"- **Rôle humain :** définition du protocole, validation des critères, revue des cas ambigus",
         f"- **Reproductibilité :** toutes les décisions journalisées dans `decisions.jsonl`",
     ])
@@ -528,7 +617,12 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
 
 
 def generate_prisma_diagram(prisma: dict) -> str:
-    """Génère un diagramme de flux PRISMA en Mermaid."""
+    """Génère un diagramme de flux PRISMA en Mermaid.
+
+    Deux formes : avec stage d'éligibilité full-text (nœuds séparés
+    non-récupérés / exclus éligibilité / inclus final) ou forme historique
+    (sans stage — les textes récupérés vont directement à l'extraction).
+    """
     identified = prisma.get("identified", 0)
     after_dedup = prisma.get("after_dedup", 0)
     screened = prisma.get("screened", 0)
@@ -540,16 +634,54 @@ def generate_prisma_diagram(prisma: dict) -> str:
     articles_without_data = max(0, articles_submitted - articles_with_data)
     pending = max(0, prisma.get("needs_manual_pending", 0))
     excluded_screening = max(0, screened - included - pending)
-    fulltext_not_retrieved = max(0, prisma.get(
-        "fulltext_not_retrieved",
-        prisma.get("excluded_fulltext", included - fulltext_retrieved),
-    ))
+    # Non-récupération = accès uniquement ; excluded_fulltext (historique)
+    # n'est plus jamais utilisé comme fallback.
+    fulltext_not_retrieved = max(0, int(prisma.get(
+        "fulltext_not_retrieved", included - fulltext_retrieved,
+    ) or 0))
     pending_node = (
         f'    C --> I["En attente (HITL)<br/>n = {pending}"]\n'
         if pending > 0 else ""
     )
 
+    if "fulltext_screened" in prisma:
+        fulltext_screened = int(prisma.get("fulltext_screened", 0) or 0)
+        excluded_eligibility = int(prisma.get("excluded_fulltext_eligibility", 0) or 0)
+        included_final = int(prisma.get("included_final", 0) or 0)
+        fulltext_pending = int(prisma.get("fulltext_review_pending", 0) or 0)
+        fulltext_pending_node = (
+            f'    F --> P["En attente (HITL texte intégral)<br/>n = {fulltext_pending}"]\n'
+            if fulltext_pending > 0 else ""
+        )
+        return f"""# Diagramme de flux PRISMA
+
+```mermaid
+flowchart TD
+    A["Articles identifiés<br/>n = {identified}"] --> B["Après déduplication<br/>n = {after_dedup}"]
+    B --> C["Articles screenés<br/>(titres + abstracts)<br/>n = {screened}"]
+    C --> D["Exclus au screening<br/>n = {excluded_screening}"]
+{pending_node}    C --> E["**Inclus après screening**<br/>**n = {included}**"]
+    E --> F["Textes intégraux récupérés<br/>et évalués pour éligibilité<br/>n = {fulltext_screened}"]
+    E --> H["Non récupérés<br/>(paywall / pas d'OA)<br/>n = {fulltext_not_retrieved}"]
+    F --> X["Exclus à l'éligibilité<br/>(texte intégral, avec raisons)<br/>n = {excluded_eligibility}"]
+{fulltext_pending_node}    F --> K["**Inclus (final)**<br/>**n = {included_final}**"]
+    K --> G["**Articles avec donnée exploitable**<br/>**n = {articles_with_data}**"]
+    K --> J["Articles sans donnée exploitable<br/>n = {articles_without_data}"]
+
+    style E fill:#4CAF50,color:#fff
+    style K fill:#4CAF50,color:#fff
+    style G fill:#4CAF50,color:#fff
+    style J fill:#ff9800,color:#fff
+    style D fill:#f44336,color:#fff
+    style X fill:#f44336,color:#fff
+    style H fill:#ff9800,color:#fff
+```
+"""
+
     return f"""# Diagramme de flux PRISMA
+
+> ⚠️ Revue sans stage d'éligibilité full-text (`sysrev-screen-fulltext`) :
+> les textes récupérés passent directement à l'extraction.
 
 ```mermaid
 flowchart TD
@@ -629,11 +761,32 @@ def main(rid: str, use_mock: bool = False):
 
     counts = extraction_counts(extractions)
     fulltext_retrieved = recovered_text_count(prisma)
-    expected_cells = fulltext_retrieved * len(codebook)
+
+    # Un rapport ne peut pas être final avec des cas d'éligibilité full-text
+    # non tranchés : refuser tant que la file HITL n'est pas vide.
+    fulltext_pending = int(prisma.get("fulltext_review_pending", 0) or 0)
+    if fulltext_pending > 0:
+        message = (
+            f"{fulltext_pending} cas d'éligibilité full-text en attente de "
+            'décision humaine (to_review_fulltext.jsonl). Traite-les via '
+            'sysrev-review (queue "fulltext") avant de générer le rapport.'
+        )
+        print(f"❌ {message}", file=sys.stderr)
+        raise RuntimeError(message)
+
+    # Base de cohérence des cellules : les inclusions finales full-text si le
+    # stage d'éligibilité a tourné, sinon (revue historique) les textes récupérés.
+    if "included_final" in prisma:
+        expected_articles = int(prisma.get("included_final", 0) or 0)
+        expected_label = "inclusions finales"
+    else:
+        expected_articles = fulltext_retrieved
+        expected_label = "textes récupérés"
+    expected_cells = expected_articles * len(codebook)
     if len(extractions) != expected_cells:
         message = (
             f"Cellules d'extraction incohérentes : attendu {expected_cells} "
-            f"({fulltext_retrieved} textes × {len(codebook)} variable(s)), "
+            f"({expected_articles} {expected_label} × {len(codebook)} variable(s)), "
             f"trouvé {len(extractions)}. Rapport refusé."
         )
         print(f"❌ {message}", file=sys.stderr)
@@ -674,6 +827,7 @@ def main(rid: str, use_mock: bool = False):
     with open(f"{base}/decisions.jsonl", encoding="utf-8") as f:
         decisions = [json.loads(line) for line in f if line.strip()]
     screening_decisions, unknown_entries = resolve_screening_decisions(decisions)
+    fulltext_exclusions = resolve_fulltext_exclusions(decisions)
     manifest["journal_unknown_entries"] = unknown_entries
 
     # Chargement des candidats pour l'export RIS
@@ -722,7 +876,8 @@ def main(rid: str, use_mock: bool = False):
     # Génération des fichiers
     report_md = generate_report(rid, protocol, prisma, extractions, screening_decisions,
                                 review_mode, candidates=candidates,
-                                to_review=to_review_list, synthesis=synthesis)
+                                to_review=to_review_list, synthesis=synthesis,
+                                fulltext_exclusions=fulltext_exclusions)
     prisma_md = generate_prisma_diagram(prisma)
     ris_content = generate_ris(extractions, candidates)
 

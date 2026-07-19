@@ -46,7 +46,7 @@ What pushed me down the rabbit hole was **[Hermes Agent](https://github.com/Nous
 A review runs as a pipeline of small, independent, testable steps:
 
 ```
-protocol → search → dedup → screen → (human review) → fulltext → extract → report
+protocol → search → dedup → screen → (human review) → fulltext → screen-fulltext → (human review) → extract → report
 ```
 
 - **protocol** — captures your research question, inclusion/exclusion criteria, and extraction codebook.
@@ -55,7 +55,8 @@ protocol → search → dedup → screen → (human review) → fulltext → ext
 - **screen** — scores each article against your criteria; confident cases are decided automatically, ambiguous ones are queued for you.
 - **human review** — you decide the ambiguous cases. The AI proposes; you dispose.
 - **fulltext** — retrieves and parses PDFs (open-access URLs + a dropzone for papers you obtained through institutional access).
-- **extract** — pulls data according to your codebook using a two-pass anti-hallucination method (verbatim evidence first, then bounded synthesis).
+- **screen-fulltext** — re-assesses eligibility on the *full text*: an article included on abstract can still be excluded once the PDF is read, with the violated criterion logged. "PDF not retrievable" (access) and "excluded on eligibility" are kept strictly separate in the PRISMA flow. Ambiguous cases go back to you.
+- **extract** — pulls data according to your codebook using a two-pass anti-hallucination method (verbatim evidence first, then bounded synthesis). Only *final* full-text inclusions are extracted.
 - **report** — generates a narrative synthesis, a PRISMA flow diagram, and a `.ris` export for Zotero/Mendeley.
 
 The whole thing is orchestrated by a single agent that changes hats at each step — not ten parallel processes, just one organized researcher working sequentially.
@@ -84,6 +85,7 @@ Honest snapshot. This is build-in-public, not a product launch.
 |---|---|
 | Default mode | scoping review (PRISMA-ScR) |
 | End-to-end pipeline (7 core skills) | ✅ Works, validated on a real 86-article scoping review (86 → 75 → 47, ~$0.38 in tokens) |
+| Full-text eligibility screening (`screen-fulltext`) | ✅ Implemented with mock E2E tests; not yet exercised on a real review |
 | Scholarly search (OpenAlex, key required since Feb 2026) | ✅ Working, with full pagination + failure states |
 | LLM screening / extraction / synthesis | ✅ Working (OpenAI-compatible endpoint; I use DeepSeek v4) |
 | PDF parsing (open-access + dropzone) | ✅ Working |

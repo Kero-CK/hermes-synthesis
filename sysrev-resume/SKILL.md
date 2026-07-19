@@ -48,7 +48,9 @@ prochaine action est Y. »
 | `dedup_done` | Lancer `screen` |
 | `screen_done` | Si `to_review.jsonl` non vide → lancer `review` / sinon → lancer `fulltext` |
 | `review_done` | Lancer `fulltext` |
-| `fulltext_done` | Lancer `extract` |
+| `fulltext_done` | Lancer `screen-fulltext` (éligibilité sur texte intégral) |
+| `screen_fulltext_done` | Si `to_review_fulltext.jsonl` non vide → lancer `review` (queue `fulltext`) / sinon → lancer `extract` |
+| `review_fulltext_done` | Lancer `extract` |
 | `extract_done` | Lancer `report` |
 | `report_done` | Revue terminée ✅ |
 

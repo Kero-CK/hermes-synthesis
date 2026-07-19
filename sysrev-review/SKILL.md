@@ -4,11 +4,14 @@ description: >
   Présente tous les cas ambigus du screening au chercheur en une seule fois
   (mode batch). Le chercheur lit la liste, prend son temps, et répond avec
   ses décisions. À utiliser après screen, quand to_review.jsonl contient des
-  articles que l'IA n'a pas pu classer automatiquement.
+  articles que l'IA n'a pas pu classer automatiquement. Gère aussi la file
+  d'éligibilité full-text (queue "fulltext", to_review_fulltext.jsonl) après
+  sysrev-screen-fulltext.
 inputs:
-  - /reviews/<id>/to_review.jsonl (cas ambigus)
+  - /reviews/<id>/to_review.jsonl (cas ambigus screening titre/abstract)
+  - /reviews/<id>/to_review_fulltext.jsonl (cas ambigus éligibilité full-text)
   - /reviews/<id>/candidates.csv (pour les abstracts complets)
-  - /reviews/<id>/manifest.json (stage = "screen_done")
+  - /reviews/<id>/manifest.json (stage = "screen_done" ou "screen_fulltext_done")
 outputs:
   - /reviews/<id>/decisions.jsonl (décisions humaines ajoutées)
   - /reviews/<id>/to_review.jsonl (mis à jour)
@@ -27,8 +30,20 @@ avec l'IA.
 
 # Pré-conditions
 
-- `manifest.json` indique `stage = "screen_done"`
-- `to_review.jsonl` existe avec au moins un cas
+- `manifest.json` indique `stage = "screen_done"` (queue screening, défaut)
+  ou `stage = "screen_fulltext_done"` (queue fulltext)
+- `to_review.jsonl` (ou `to_review_fulltext.jsonl`) existe avec au moins un cas
+
+# Deux files HITL
+
+- **Queue `screening`** (défaut) : cas ambigus du tri titre/abstract.
+  Décisions journalisées en `stage: "human_review"`.
+- **Queue `fulltext`** : cas ambigus de l'éligibilité sur texte intégral
+  (après `sysrev-screen-fulltext`). Passer `"queue": "fulltext"` dans le JSON.
+  Décisions journalisées en `stage: "human_review_fulltext"` ; met à jour
+  `included_final` / `excluded_fulltext_eligibility` dans `prisma.json` et
+  `stage = "review_fulltext_done"`. Pour ces cas, relire le texte intégral
+  dans `sources/` avant de trancher.
 
 # Procédure
 
@@ -36,7 +51,7 @@ avec l'IA.
    ```
    python3 ~/.hermes/skills/sysrev/sysrev-review/scripts/review.py '<json>'
    ```
-   avec `{"id": "ma-revue"}`.
+   avec `{"id": "ma-revue"}` (ou `{"id": "ma-revue", "queue": "fulltext"}`).
    Le script affiche la liste formatée des cas ambigus.
 
 2. Présente la liste complète au chercheur. **Pour les listes longues (>15 cas),

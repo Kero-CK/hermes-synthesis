@@ -137,3 +137,10 @@ Mise à jour :
 - Les échecs sont journalisés (pas de trous silencieux)
 - `prisma.json` reflète le nombre de fulltexts récupérés
 - `manifest.json` indique `stage = "fulltext_done"`
+
+# Étape suivante
+
+Ce stage ne fait que RÉCUPÉRER les textes (accès). L'ÉLIGIBILITÉ sur le
+texte intégral est tranchée par le stage suivant, `sysrev-screen-fulltext` :
+un article récupéré peut encore être exclu s'il se révèle hors critères à la
+lecture complète. Ne pas enchaîner directement sur `extract`.

@@ -325,7 +325,10 @@ def main(rid: str, threshold_include: float = 0.75,
 
     manifest = json.load(open(manifest_path, encoding="utf-8"))
     validate_search_status(manifest)
-    protected_stages = {"review_done", "fulltext_done", "extract_done", "report_done"}
+    protected_stages = {
+        "review_done", "fulltext_done", "screen_fulltext_done",
+        "review_fulltext_done", "extract_done", "report_done",
+    }
     if manifest.get("stage") in protected_stages and not force:
         print(
             '❌ Un re-screening écraserait les décisions humaines déjà appliquées. '

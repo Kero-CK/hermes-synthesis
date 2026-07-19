@@ -31,6 +31,8 @@ KNOWN_JOURNAL_VOCABULARY = {
     "human_review": {"include", "exclude"},
     "screen_manual": {"include", "exclude"},  # alias historique
     "fulltext": {"retrieved", "retrieval_failed", "include", "needs_manual"},
+    "screen_fulltext": {"include", "exclude", "needs_manual"},
+    "human_review_fulltext": {"include", "exclude"},
     "extract": {"extracted", "not_found", "api_error", "rejected_citation", "include", "needs_manual"},
 }
 
@@ -113,6 +115,37 @@ def resolve_latest_fulltext(entries: list[dict]) -> tuple[list[dict], int]:
          if latest[doc].get("decision") in ("retrieved", "include")],
         unknown_entries,
     )
+
+
+def resolve_fulltext_eligibility(entries: list[dict]) -> dict[str, str] | None:
+    """Résout l'éligibilité full-text finale par article (humain > machine).
+
+    Retourne None si aucun stage screen_fulltext n'existe dans le journal
+    (revue historique, antérieure au stage d'éligibilité). Sinon, un dict
+    doc → include | exclude | needs_manual, où une décision humaine
+    (human_review_fulltext) prime sur la dernière décision machine.
+    """
+    machine: dict[str, str] = {}
+    human: dict[str, str] = {}
+    seen_stage = False
+    for entry in entries:
+        if not is_known_journal_entry(entry):
+            continue
+        stage = entry.get("stage")
+        raw_doc = entry.get("doc", "")
+        doc = raw_doc.strip() if isinstance(raw_doc, str) else ""
+        if not doc:
+            continue
+        if stage == "screen_fulltext":
+            seen_stage = True
+            machine[doc] = entry.get("decision", "")
+        elif stage == "human_review_fulltext":
+            seen_stage = True
+            if entry.get("decision") in ("include", "exclude"):
+                human[doc] = entry["decision"]
+    if not seen_stage:
+        return None
+    return machine | human
 
 
 def normalize_evidence_text(text: str) -> str:
@@ -406,6 +439,39 @@ def main(rid: str, use_mock: bool = False):
         entries = [json.loads(line) for line in f if line.strip()]
     included_documents, unknown_entries = resolve_latest_fulltext(entries)
 
+    # L'extraction ne consomme que les inclusions FINALES du stage
+    # d'éligibilité full-text (screen_fulltext, humain > machine).
+    # Une inclusion titre/abstract seule ne suffit plus.
+    eligibility = resolve_fulltext_eligibility(entries)
+    if eligibility is None:
+        print(
+            "⚠️  Aucun stage screen_fulltext dans le journal : extraction sur les "
+            "textes récupérés seuls (revue antérieure au stage d'éligibilité "
+            "full-text — lance sysrev-screen-fulltext pour une revue conforme "
+            "PRISMA-ScR).",
+            file=sys.stderr,
+        )
+    else:
+        pending = [
+            str(entry.get("doc", "") or "").strip()
+            for entry in included_documents
+            if eligibility.get(str(entry.get("doc", "") or "").strip())
+            not in ("include", "exclude")
+        ]
+        if pending:
+            print(
+                "❌ Éligibilité full-text non tranchée pour "
+                f"{len(pending)} article(s) : {', '.join(pending)}\n"
+                "   Traite to_review_fulltext.jsonl (sysrev-review, queue "
+                '"fulltext") ou relance sysrev-screen-fulltext avant l\'extraction.',
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        included_documents = [
+            entry for entry in included_documents
+            if eligibility.get(str(entry.get("doc", "") or "").strip()) == "include"
+        ]
+
     manifest_path = f"{base}/manifest.json"
     manifest = json.load(open(manifest_path, encoding="utf-8"))
     manifest["journal_unknown_entries"] = unknown_entries
@@ -413,7 +479,10 @@ def main(rid: str, use_mock: bool = False):
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     if not included_documents:
-        print("⚠️  Aucun article avec fulltext récupéré trouvé.")
+        print(
+            "⚠️  Aucun article à extraire (aucun texte récupéré, ou aucune "
+            "inclusion finale après le screening full-text)."
+        )
         csv_path = f"{base}/extraction.csv"
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             csv.DictWriter(
