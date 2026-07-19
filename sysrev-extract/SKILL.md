@@ -35,6 +35,8 @@ citation verbatim du texte source.
 # Procédure
 
 1. Charge le codebook depuis `protocol.md` (section "Codebook d'extraction").
+   S'il est absent ou vide, arrête la commande en erreur avant tout appel LLM,
+   écriture de `extraction.csv` ou mise à jour d'état.
 
 2. Exécute :
    ```
@@ -59,10 +61,19 @@ citation verbatim du texte source.
 
 5. Si « NON TROUVÉ » pour une variable, marque `not_found` dans le journal.
 
+6. Les compteurs distinguent les articles soumis, les cellules tentées, les
+   valeurs exploitables, les `NON TROUVÉ`, les erreurs API et les citations
+   rejetées. Le nombre de cellules attendu est le nombre de textes récupérés
+   multiplié par le nombre de variables du codebook.
+
 # Règles
 
 - **Zéro invention.** Si le texte ne contient pas l'information, écrire
   « NON TROUVÉ » — ne jamais deviner ni interpoler.
+- **Dernier état fulltext.** Le journal étant append-only, pour chaque article
+  seul le dernier événement `fulltext` valide fait foi. Un dernier
+  `retrieval_failed` bloque l'extraction même si une ancienne ligne indiquait
+  `retrieved` ou l'alias historique `include`.
 - **Traçabilité totale.** Chaque valeur est accompagnée de sa citation
   verbatim et de sa section dans le document source.
 - **Codebook figé.** Ne pas ajouter de variable non définie dans le protocole.

@@ -91,7 +91,7 @@ Honest snapshot. This is build-in-public, not a product launch.
 | Reproducibility (temperature 0; versioned model ID recommended) | ✅ |
 | **Recall calibration against a hand-labelled gold set** | ⚠️ **Not yet done on a real domain** — see below |
 | Robustness hardening on all network/LLM steps | 🔨 In progress (search hardened; fulltext/screen/extract next) |
-| Multi-source retrieval (~20 databases via MCP) | ⬜ V2 |
+| Multi-source retrieval via direct, validated API connectors | ⬜ V2 |
 | A friendly UI / dashboard | ⬜ In progress (starting with Obsidian Dataview) |
 
 **The honest caveat that matters most:** the screening step is only as trustworthy as its measured recall. I have a `calibrate` skill for this, but I have **not yet run a full gold-set calibration on a real research domain**. Until I do, treat the screening as recall-first-by-design but not yet formally validated. This is the top priority on the roadmap, and I'll report the numbers openly when I have them.
@@ -107,7 +107,7 @@ Hermes Synthesis is a thin layer of custom **skills** on top of general, free, s
 | Orchestration | [Hermes Agent](https://github.com/NousResearch/hermes-agent) (Nous Research) | Single agent, skills, memory, human-in-the-loop, cron, MCP |
 | Memory / RAG | [GBrain](https://github.com/garrytan/gbrain) | Semantic index + knowledge graph, local embeddings |
 | Vault | [Obsidian](https://obsidian.md) | Markdown knowledge the user owns |
-| Retrieval | [OpenAlex](https://openalex.org) (V1) → [paper-search-mcp](https://github.com/openags/paper-search-mcp) (V2) | Scholarly metadata + citations |
+| Retrieval | [OpenAlex](https://openalex.org) (V1) → direct source-specific API connectors (V2) | Scholarly metadata + citations |
 | PDF parsing | [pymupdf4llm](https://github.com/pymupdf/pymupdf4llm) | PDF → clean Markdown |
 | Models | any OpenAI-compatible endpoint | You bring your key, you choose your model |
 | Container | [Docker](https://github.com/docker) | Reproducible environment |
@@ -120,7 +120,7 @@ Each skill is a folder: a `SKILL.md` recipe (the judgment, in plain language) pl
 
 **V1 (done):** complete auditable pipeline, OpenAlex search, DeepSeek screening/extraction/report, double-pass extraction, PRISMA + RIS export, audit log, resume, batch human-in-the-loop.
 
-**V2:** multi-source retrieval via `paper-search-mcp` (~20 databases), scale parallelism, async human-in-the-loop (Slack/Telegram), Obsidian Dataview dashboards, living reviews (cron), Docker packaging, multilingual queries.
+**V2:** multi-source retrieval through small, directly tested API connectors ([source-by-source roadmap](MULTI_SOURCE_ROADMAP.md)), scale parallelism, async human-in-the-loop (Slack/Telegram), Obsidian Dataview dashboards, living reviews (cron), Docker packaging, multilingual queries.
 
 **V3 and beyond:** the review tool becomes a genuine *research companion* — memory that composes across projects, snowballing via citation graphs, specialized classifiers, inter-rater agreement, review versioning.
 

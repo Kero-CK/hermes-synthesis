@@ -8,7 +8,7 @@ description: >
 inputs:
   - /reviews/<id>/candidates.csv (dédupliqué)
   - /reviews/<id>/protocol.md (critères inclusion/exclusion)
-  - /reviews/<id>/manifest.json (stage = "dedup_done")
+  - /reviews/<id>/manifest.json (stage = "dedup_done", search_status = "complete")
 outputs:
   - /reviews/<id>/decisions.jsonl (décisions journalisées)
   - /reviews/<id>/to_review.jsonl (cas ambigus pour HITL)
@@ -41,10 +41,21 @@ Sans ces variables, le script bascule automatiquement en mode mock
 # Pré-conditions
 
 - `manifest.json` indique `stage = "dedup_done"`
+- `manifest.json` indique exactement `search_status = "complete"`.
+  Tout autre statut, un statut inconnu ou l'absence du champ bloque le
+  screening. Le paramètre `force` ne contourne jamais cette barrière.
 - `candidates.csv` existe (dédupliqué)
 - `protocol.md` existe avec critères inclusion/exclusion
 
+Le screening ne peut pas traiter un corpus `incomplete`, `capped` ou `error`
+comme s'il était complet. Corriger ou relancer la recherche avant de
+continuer ; pour `capped`, augmenter `HARD_LIMIT` peut être nécessaire.
+
 # Procédure
+
+Avant toute évaluation, `screen.py` relit `manifest.json` et refuse de
+continuer si `search_status` n'est pas exactement `"complete"`. Le refus
+intervient avant le mock/LLM et avant toute écriture d'audit ou d'état.
 
 1. Lis `protocol.md` pour extraire les critères d'inclusion et d'exclusion.
 

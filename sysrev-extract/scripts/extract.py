@@ -16,6 +16,7 @@ JSON attendu:
 """
 
 import csv
+import hashlib
 import json
 import os
 import re
@@ -34,10 +35,84 @@ KNOWN_JOURNAL_VOCABULARY = {
 }
 
 
+def candidate_identity(candidate: dict) -> tuple[str, str] | None:
+    """Retourne l'identité stable DOI → source_id → oa_url."""
+    for kind in ("doi", "source_id", "oa_url"):
+        raw_value = candidate.get(kind, "")
+        value = raw_value.strip() if isinstance(raw_value, str) else ""
+        if value:
+            return kind, value
+    return None
+
+
+def candidate_identity_values(candidate: dict) -> list[tuple[str, str]]:
+    """Retourne tous les identifiants disponibles pour les anciens journaux."""
+    values = []
+    for kind in ("doi", "source_id", "oa_url"):
+        raw_value = candidate.get(kind, "")
+        if isinstance(raw_value, str) and raw_value.strip():
+            values.append((kind, raw_value.strip()))
+    return values
+
+
+def safe_document_filename(value: str, identity_type: str = "") -> str:
+    """Construit le même nom de fichier sûr que le stage fulltext."""
+    if identity_type == "doi":
+        return value.replace("/", "_")
+    safe = re.sub(r'[<>:"/\\|?*]', "_", value).strip().rstrip(". ")
+    safe = safe or "document"
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    return f"{identity_type or 'id'}_{safe[:100]}_{digest}"
+
+
 def is_known_journal_entry(entry: dict) -> bool:
     """Vérifie le couple stage/décision, y compris les alias historiques."""
     stage = entry.get("stage")
     return entry.get("decision") in KNOWN_JOURNAL_VOCABULARY.get(stage, set())
+
+
+def resolve_latest_fulltext(entries: list[dict]) -> tuple[list[dict], int]:
+    """Résout le dernier événement fulltext valide de chaque article.
+
+    Le journal est append-only : son ordre de lignes fait foi. Un échec ou un
+    état manuel ultérieur remplace donc un ancien succès, tandis qu'une ligne
+    inconnue ou sans identité est ignorée et ne peut pas écraser le dernier
+    événement valide. Les alias historiques ``fulltext/include`` et
+    ``fulltext/retrieved`` restent extractibles.
+    """
+    latest: dict[str, dict] = {}
+    order: list[str] = []
+    unknown_entries = 0
+
+    for line_number, entry in enumerate(entries, 1):
+        if not is_known_journal_entry(entry):
+            unknown_entries += 1
+            print(
+                f"⚠️  Journal ligne {line_number} : tuple inconnu "
+                f"(stage={entry.get('stage')!r}, decision={entry.get('decision')!r})",
+                file=sys.stderr,
+            )
+            continue
+        if entry.get("stage") != "fulltext":
+            continue
+
+        raw_doc = entry.get("doc", "")
+        doc = raw_doc.strip() if isinstance(raw_doc, str) else ""
+        if not doc:
+            print(
+                f"⚠️  Journal ligne {line_number} : événement fulltext sans identité",
+                file=sys.stderr,
+            )
+            continue
+        if doc not in latest:
+            order.append(doc)
+        latest[doc] = entry
+
+    return (
+        [latest[doc] for doc in order
+         if latest[doc].get("decision") in ("retrieved", "include")],
+        unknown_entries,
+    )
 
 
 def normalize_evidence_text(text: str) -> str:
@@ -51,6 +126,39 @@ def citation_is_verifiable(citation: str, fulltext: str) -> bool:
     """Vérifie qu'une citation non vide est présente dans le texte normalisé."""
     normalized_citation = normalize_evidence_text(citation)
     return bool(normalized_citation) and normalized_citation in normalize_evidence_text(fulltext)
+
+
+def load_codebook(protocol_path: str) -> list[dict]:
+    """Charge et valide le codebook avant toute écriture ou appel LLM."""
+    codebook: list[dict] = []
+    if os.path.exists(protocol_path):
+        with open(protocol_path, encoding="utf-8") as f:
+            in_codebook = False
+            for line in f:
+                if "Codebook d'extraction" in line:
+                    in_codebook = True
+                    continue
+                if in_codebook and line.startswith("##"):
+                    break
+                if in_codebook and line.startswith("- **"):
+                    parts = line[4:].split("** : ", 1)
+                    if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                        codebook.append({
+                            "name": parts[0].strip(),
+                            "description": parts[1].strip(),
+                        })
+    if not codebook:
+        message = f"Codebook d'extraction absent ou vide : {protocol_path}"
+        print(f"❌ {message}", file=sys.stderr)
+        raise RuntimeError(message)
+    return codebook
+
+
+def is_exploitable_value(value: str) -> bool:
+    """Indique si une cellule apporte une donnée utilisable."""
+    return bool(str(value or "").strip()) and value not in (
+        "NON TROUVÉ", "ERREUR API", "CITATION REJETÉE"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +363,8 @@ def mock_extract(fulltext: str, variable_name: str, variable_desc: str,
 # ---------------------------------------------------------------------------
 
 def log_decision(base: str, doi: str, variable: str, decision: str, reason: str,
-                 run_id: str):
+                 run_id: str, *, identity_type: str = "doi", source_id: str = "",
+                 oa_url: str = "", actual_doi: str = ""):
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "run": run_id,
@@ -265,6 +374,13 @@ def log_decision(base: str, doi: str, variable: str, decision: str, reason: str,
         "decision": decision,
         "reason": reason,
     }
+    if identity_type != "doi":
+        entry.update({
+            "identity_type": identity_type,
+            "doi": actual_doi,
+            "source_id": source_id,
+            "oa_url": oa_url,
+        })
     with open(f"{base}/decisions.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
@@ -280,28 +396,15 @@ def main(rid: str, use_mock: bool = False):
     decisions_path = f"{base}/decisions.jsonl"
     run_id = datetime.now(timezone.utc).isoformat()
 
-    # Identifie les articles dont le fulltext a été récupéré.
-    included_dois: list[str] = []
-    seen: set[str] = set()
-    unknown_entries = 0
+    # Le codebook est une précondition stricte : vérifier avant tout état,
+    # journal ou appel LLM.
+    codebook = load_codebook(protocol_path)
+
+    # Le dernier événement fulltext valide gagne, y compris lorsqu'il s'agit
+    # d'un échec ultérieur. Cela évite de réutiliser un ancien succès périmé.
     with open(decisions_path, encoding="utf-8") as f:
-        for line_number, line in enumerate(f, 1):
-            if not line.strip():
-                continue
-            entry = json.loads(line)
-            if not is_known_journal_entry(entry):
-                unknown_entries += 1
-                print(
-                    f"⚠️  Journal ligne {line_number} : tuple inconnu "
-                    f"(stage={entry.get('stage')!r}, decision={entry.get('decision')!r})",
-                    file=sys.stderr,
-                )
-                continue
-            if entry.get("stage") == "fulltext" and entry.get("decision") in ("retrieved", "include"):
-                doc = entry.get("doc", "")
-                if doc and doc not in seen:
-                    included_dois.append(doc)
-                    seen.add(doc)
+        entries = [json.loads(line) for line in f if line.strip()]
+    included_documents, unknown_entries = resolve_latest_fulltext(entries)
 
     manifest_path = f"{base}/manifest.json"
     manifest = json.load(open(manifest_path, encoding="utf-8"))
@@ -309,36 +412,43 @@ def main(rid: str, use_mock: bool = False):
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
-    if not included_dois:
+    if not included_documents:
         print("⚠️  Aucun article avec fulltext récupéré trouvé.")
+        csv_path = f"{base}/extraction.csv"
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            csv.DictWriter(
+                f,
+                fieldnames=[
+                    "doi", "source_id", "oa_url", "doc", "identity_type",
+                    "variable", "valeur", "citation", "section",
+                ],
+            ).writeheader()
+        manifest["stage"] = "extract_done"
+        manifest["extraction_total"] = 0
+        manifest["extraction_cells_expected"] = 0
+        manifest["extraction_cells_attempted"] = 0
+        manifest["extraction_values"] = 0
+        manifest["extraction_articles"] = 0
+        manifest["extraction_articles_with_data"] = 0
+        manifest["extraction_articles_without_data"] = 0
+        manifest["extraction_not_found"] = 0
+        manifest["extraction_api_errors"] = 0
+        manifest["extraction_rejected_citations"] = 0
+        manifest["updated"] = datetime.now(timezone.utc).isoformat()
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
         return
 
-    # Charge le codebook depuis protocol.md
-    codebook: list[dict] = []
-    in_codebook = False
-    if os.path.exists(protocol_path):
-        with open(protocol_path, encoding="utf-8") as f:
-            for line in f:
-                if "Codebook d'extraction" in line:
-                    in_codebook = True
-                    continue
-                if in_codebook and line.startswith("##"):
-                    break
-                if in_codebook and line.startswith("- **"):
-                    # Format: - **nom** : description
-                    parts = line[4:].split("** : ", 1)
-                    if len(parts) == 2:
-                        codebook.append({
-                            "name": parts[0].strip(),
-                            "description": parts[1].strip(),
-                        })
-
-    if not codebook:
-        print("⚠️  Aucun codebook trouvé dans protocol.md.")
-        return
+    candidates_by_identity: dict[str, dict] = {}
+    candidates_path = f"{base}/candidates.csv"
+    if os.path.exists(candidates_path):
+        with open(candidates_path, newline="", encoding="utf-8") as f:
+            for candidate in csv.DictReader(f):
+                for _, identity_value in candidate_identity_values(candidate):
+                    candidates_by_identity[identity_value] = candidate
 
     print(f"📋 Codebook : {len(codebook)} variable(s)")
-    print(f"📄 Articles : {len(included_dois)}")
+    print(f"📄 Articles : {len(included_documents)}")
     print()
 
     extract_fn = mock_extract if use_mock else llm_extract
@@ -348,9 +458,19 @@ def main(rid: str, use_mock: bool = False):
     api_errors = 0
     rejected_citations = 0
     total = 0
+    articles_with_data: set[str] = set()
+    cells_expected = len(included_documents) * len(codebook)
 
-    for doi in included_dois:
-        doi_safe = doi.replace("/", "_")
+    for decision_entry in included_documents:
+        raw_doc = decision_entry.get("doc", "")
+        doc = raw_doc.strip() if isinstance(raw_doc, str) else ""
+        candidate = candidates_by_identity.get(doc, {})
+        identity = candidate_identity(candidate)
+        identity_type = decision_entry.get("identity_type", "") or (identity[0] if identity else "")
+        source_id = candidate.get("source_id", decision_entry.get("source_id", ""))
+        oa_url = candidate.get("oa_url", decision_entry.get("oa_url", ""))
+        actual_doi = candidate.get("doi", decision_entry.get("doi", ""))
+        doi_safe = safe_document_filename(doc, identity_type)
         md_path = f"{sources_dir}/{doi_safe}.md"
 
         fulltext = ""
@@ -358,12 +478,12 @@ def main(rid: str, use_mock: bool = False):
             with open(md_path, encoding="utf-8") as f:
                 fulltext = f.read()
         else:
-            print(f"  ⚠️  Texte intégral manquant pour {doi}")
+            print(f"  ⚠️  Texte intégral manquant pour {doc}")
             continue
 
         for var in codebook:
             total += 1
-            result = extract_fn(fulltext, var["name"], var["description"], doi)
+            result = extract_fn(fulltext, var["name"], var["description"], doc)
             valeur = result["valeur"]
             citation = result["citation"]
             section = result.get("section", "")
@@ -374,36 +494,57 @@ def main(rid: str, use_mock: bool = False):
                 section = ""
 
             rows.append({
-                "doi": doi,
+                "doi": actual_doi if identity_type == "doi" else "",
+                "source_id": source_id,
+                "oa_url": oa_url,
+                "doc": doc,
+                "identity_type": identity_type,
                 "variable": var["name"],
                 "valeur": valeur,
                 "citation": citation,
                 "section": section,
             })
 
+            if is_exploitable_value(valeur):
+                articles_with_data.add(doc)
+
             if valeur == "CITATION REJETÉE":
                 rejected_citations += 1
-                log_decision(base, doi, var["name"], "rejected_citation",
-                             "Citation non vérifiable dans le texte source", run_id)
+                log_decision(base, doc, var["name"], "rejected_citation",
+                             "Citation non vérifiable dans le texte source", run_id,
+                             identity_type=identity_type, source_id=source_id,
+                             oa_url=oa_url, actual_doi=actual_doi)
                 print(f"  ❌ {doi_safe} / {var['name']} → CITATION REJETÉE")
             elif valeur == "ERREUR API":
                 api_errors += 1
-                log_decision(base, doi, var["name"], "api_error",
-                             "Échec API LLM — variable non évaluée", run_id)
+                log_decision(base, doc, var["name"], "api_error",
+                             "Échec API LLM — variable non évaluée", run_id,
+                             identity_type=identity_type, source_id=source_id,
+                             oa_url=oa_url, actual_doi=actual_doi)
                 print(f"  ❌ {doi_safe} / {var['name']} → ERREUR API")
             elif valeur == "NON TROUVÉ":
                 not_found += 1
-                log_decision(base, doi, var["name"], "not_found",
-                             f"Variable '{var['name']}' non trouvée dans le texte", run_id)
+                log_decision(base, doc, var["name"], "not_found",
+                             f"Variable '{var['name']}' non trouvée dans le texte", run_id,
+                             identity_type=identity_type, source_id=source_id,
+                             oa_url=oa_url, actual_doi=actual_doi)
                 print(f"  ⚠️  {doi_safe} / {var['name']} → NON TROUVÉ")
             else:
-                log_decision(base, doi, var["name"], "extracted",
-                             f"Extraction réussie ({len(citation)} caractères)", run_id)
+                log_decision(base, doc, var["name"], "extracted",
+                             f"Extraction réussie ({len(citation)} caractères)", run_id,
+                             identity_type=identity_type, source_id=source_id,
+                             oa_url=oa_url, actual_doi=actual_doi)
                 print(f"  ✅ {doi_safe} / {var['name']} → {valeur[:60]}")
 
     # Écriture extraction.csv
     csv_path = f"{base}/extraction.csv"
-    cols = ["doi", "variable", "valeur", "citation", "section"]
+    has_non_doi = any(row.get("identity_type") != "doi" for row in rows)
+    cols = (
+        ["doi", "source_id", "oa_url", "doc", "identity_type",
+         "variable", "valeur", "citation", "section"]
+        if has_non_doi else
+        ["doi", "variable", "valeur", "citation", "section"]
+    )
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
         w.writeheader()
@@ -412,6 +553,14 @@ def main(rid: str, use_mock: bool = False):
     # Mise à jour manifest.json
     manifest["stage"] = "extract_done"
     manifest["extraction_total"] = total
+    manifest["extraction_cells_expected"] = cells_expected
+    manifest["extraction_cells_attempted"] = total
+    manifest["extraction_values"] = total - not_found - api_errors - rejected_citations
+    manifest["extraction_articles"] = len(included_documents)
+    manifest["extraction_articles_with_data"] = len(articles_with_data)
+    manifest["extraction_articles_without_data"] = max(
+        0, len(included_documents) - len(articles_with_data)
+    )
     manifest["extraction_not_found"] = not_found
     manifest["extraction_api_errors"] = api_errors
     manifest["extraction_rejected_citations"] = rejected_citations
@@ -425,7 +574,9 @@ def main(rid: str, use_mock: bool = False):
     print(f"   ⚠️  NON TROUVÉ  : {not_found}")
     print(f"   ❌ Erreurs API : {api_errors}")
     print(f"   ❌ Citations rejetées : {rejected_citations}")
-    print(f"   📋 Total        : {total} cellules")
+    print(f"   📋 Cellules tentées : {total}")
+    print(f"   📄 Articles soumis : {len(included_documents)}")
+    print(f"   ✅ Articles avec donnée : {len(articles_with_data)}")
     print(f"   📁 Fichier      : {csv_path}")
     if api_errors:
         print(

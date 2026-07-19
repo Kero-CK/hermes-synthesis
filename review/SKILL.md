@@ -56,6 +56,12 @@ pour les validations humaines (protocole, requêtes, cas ambigus).
 7. Proposer une **requête par source** basée sur la question.
 8. Faire valider chaque requête par l'utilisateur.
 9. Exécuter la skill `sysrev-search` en mode réel (pas de mock).
+9a. Relire `/reviews/<id>/manifest.json` et vérifier que
+    `search_status` vaut exactement `"complete"`. Si le champ est absent,
+    inconnu, `incomplete`, `capped` ou `error`, arrêter le pipeline avant
+    `sysrev-dedup` et `sysrev-screen`. Pour `capped`, corriger la recherche
+    ou augmenter `HARD_LIMIT` puis la relancer. Aucun `force` de screening ne
+    permet de contourner cette barrière.
 
 ## Phase 3 — Déduplication
 10. Exécuter la skill `sysrev-dedup`.

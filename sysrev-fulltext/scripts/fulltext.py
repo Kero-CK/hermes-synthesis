@@ -13,8 +13,10 @@ JSON attendu:
 """
 
 import csv
+import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import urllib.request
@@ -32,10 +34,62 @@ KNOWN_JOURNAL_VOCABULARY = {
 HUMAN_SCREEN_STAGES = {"human_review", "screen_manual"}
 
 
-def select_included_dois(entries: list[dict]) -> tuple[list[str], int]:
-    """Sélectionne les inclusions avec priorité humaine et signale le vocabulaire inconnu."""
-    machine_decisions: dict[str, str] = {}
-    human_decisions: dict[str, str] = {}
+def candidate_identity(candidate: dict) -> tuple[str, str] | None:
+    """Retourne l'identité stable DOI → source_id → oa_url."""
+    for kind in ("doi", "source_id", "oa_url"):
+        raw_value = candidate.get(kind, "")
+        value = raw_value.strip() if isinstance(raw_value, str) else ""
+        if value:
+            return kind, value
+    return None
+
+
+def candidate_identity_values(candidate: dict) -> list[tuple[str, str]]:
+    """Retourne tous les identifiants disponibles pour les anciens journaux."""
+    values = []
+    for kind in ("doi", "source_id", "oa_url"):
+        raw_value = candidate.get(kind, "")
+        if isinstance(raw_value, str) and raw_value.strip():
+            values.append((kind, raw_value.strip()))
+    return values
+
+
+def safe_document_filename(value: str, identity_type: str = "") -> str:
+    """Construit un nom de fichier Windows sûr et stable.
+
+    Les DOI conservent exactement la convention historique ``/`` → ``_``.
+    Les identifiants de repli sont nettoyés et suffixés d'un hash pour éviter
+    les collisions entre URLs ou identifiants différents.
+    """
+    if identity_type == "doi":
+        return value.replace("/", "_")
+    safe = re.sub(r'[<>:"/\\|?*]', "_", value).strip().rstrip(". ")
+    safe = safe or "document"
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    return f"{identity_type or 'id'}_{safe[:100]}_{digest}"
+
+
+def read_valid_markdown(path: str, minimum_characters: int = 500) -> str | None:
+    """Retourne un Markdown déjà récupéré s'il est suffisamment substantiel.
+
+    Le cache est vérifié par chemin d'identité du corpus courant. Un fichier
+    étranger dans ``sources/`` n'est donc jamais compté ni réutilisé pour un
+    autre article.
+    """
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            content = handle.read()
+    except (OSError, UnicodeError):
+        return None
+    return content if len(content) > minimum_characters else None
+
+
+def _screening_documents(entries: list[dict]) -> tuple[list[dict], int]:
+    """Résout les inclusions et conserve les métadonnées d'identité."""
+    machine_decisions: dict[str, dict] = {}
+    human_decisions: dict[str, dict] = {}
     order: list[str] = []
     unknown_entries = 0
 
@@ -56,23 +110,34 @@ def select_included_dois(entries: list[dict]) -> tuple[list[str], int]:
         if decision not in ("include", "exclude"):
             continue
 
-        doc = entry.get("doc", "")
+        raw_doc = entry.get("doc", "")
+        doc = raw_doc.strip() if isinstance(raw_doc, str) else ""
         if not doc:
-            print(f"⚠️  Journal ligne {line_number} : décision de screening sans DOI", file=sys.stderr)
+            print(
+                f"⚠️  Journal ligne {line_number} : décision de screening sans identité",
+                file=sys.stderr,
+            )
             continue
         if doc not in machine_decisions and doc not in human_decisions:
             order.append(doc)
 
         if stage in HUMAN_SCREEN_STAGES:
-            human_decisions[doc] = decision
+            human_decisions[doc] = entry
         else:
-            machine_decisions[doc] = decision
+            machine_decisions[doc] = entry
 
-    included_dois = [
-        doc for doc in order
-        if human_decisions.get(doc, machine_decisions.get(doc)) == "include"
-    ]
-    return included_dois, unknown_entries
+    selected = []
+    for doc in order:
+        entry = human_decisions.get(doc) or machine_decisions.get(doc)
+        if entry and entry.get("decision") == "include":
+            selected.append(entry)
+    return [entry for entry in selected if entry], unknown_entries
+
+
+def select_included_dois(entries: list[dict]) -> tuple[list[str], int]:
+    """Sélectionne les inclusions avec priorité humaine et signale le vocabulaire inconnu."""
+    documents, unknown_entries = _screening_documents(entries)
+    return [entry["doc"] for entry in documents], unknown_entries
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +329,9 @@ def mock_fulltext(doi: str) -> str | None:
 # Journalisation
 # ---------------------------------------------------------------------------
 
-def log_decision(base: str, doi: str, decision: str, reason: str, run_id: str):
+def log_decision(base: str, doi: str, decision: str, reason: str, run_id: str, *,
+                 identity_type: str = "doi", source_id: str = "", oa_url: str = "",
+                 actual_doi: str = ""):
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "run": run_id,
@@ -273,6 +340,13 @@ def log_decision(base: str, doi: str, decision: str, reason: str, run_id: str):
         "decision": decision,
         "reason": reason,
     }
+    if identity_type != "doi":
+        entry.update({
+            "identity_type": identity_type,
+            "doi": actual_doi,
+            "source_id": source_id,
+            "oa_url": oa_url,
+        })
     with open(f"{base}/decisions.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
@@ -295,7 +369,7 @@ def main(rid: str, use_mock: bool = False):
     # Identifie les articles inclus ; l'humain prime toujours sur la machine.
     with open(decisions_path, encoding="utf-8") as f:
         entries = [json.loads(line) for line in f if line.strip()]
-    included_dois, unknown_entries = select_included_dois(entries)
+    included_documents, unknown_entries = _screening_documents(entries)
 
     manifest_path = f"{base}/manifest.json"
     manifest = json.load(open(manifest_path, encoding="utf-8"))
@@ -303,47 +377,74 @@ def main(rid: str, use_mock: bool = False):
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
-    if not included_dois:
+    if not included_documents:
         print("⚠️  Aucun article inclus trouvé dans decisions.jsonl.")
+        prisma_path = f"{base}/prisma.json"
+        if os.path.exists(prisma_path):
+            with open(prisma_path, encoding="utf-8") as f:
+                prisma = json.load(f)
+        else:
+            prisma = {}
+        prisma["fulltext_assessed"] = 0
+        prisma["fulltext_retrieved"] = 0
+        prisma["fulltext_not_retrieved"] = 0
+        prisma.pop("excluded_fulltext", None)
+        with open(prisma_path, "w", encoding="utf-8") as f:
+            json.dump(prisma, f, indent=2, ensure_ascii=False)
+        manifest["stage"] = "fulltext_done"
+        manifest["fulltext_success"] = 0
+        manifest["fulltext_failed"] = 0
+        manifest["updated"] = datetime.now(timezone.utc).isoformat()
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
         return
 
-    # Charge candidates.csv pour les URLs OA
-    oa_urls: dict[str, str] = {}
+    # Charge candidates.csv pour les URLs OA et les identités de repli.
+    candidates_by_identity: dict[str, dict] = {}
     if os.path.exists(csv_path):
         with open(csv_path, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                doi = row.get("doi", "")
-                if doi and row.get("oa_url", "").strip():
-                    oa_urls[doi] = row["oa_url"].strip()
+                for _, identity_value in candidate_identity_values(row):
+                    candidates_by_identity[identity_value] = row
 
     os.makedirs(sources_dir, exist_ok=True)
 
     success = 0
     failed = 0
 
-    print(f"📄 Récupération des textes intégraux pour {len(included_dois)} articles...")
+    print(f"📄 Récupération des textes intégraux pour {len(included_documents)} articles...")
     if use_mock:
         print("   (mode mock — textes simulés)")
     print()
 
-    for doi in included_dois:
-        doi_safe = doi.replace("/", "_")
+    for decision_entry in included_documents:
+        doc = str(decision_entry.get("doc", "") or "").strip()
+        candidate = candidates_by_identity.get(doc, {})
+        identity = candidate_identity(candidate)
+        identity_type = decision_entry.get("identity_type", "") or (identity[0] if identity else "")
+        source_id = candidate.get("source_id", decision_entry.get("source_id", ""))
+        oa_url = str(candidate.get("oa_url", "") or decision_entry.get("oa_url", "")).strip()
+        actual_doi = candidate.get("doi", "") or decision_entry.get("doi", "")
+        doi_safe = safe_document_filename(doc, identity_type)
         md_path = f"{sources_dir}/{doi_safe}.md"
 
-        content = None
+        content = read_valid_markdown(md_path)
+        reused_existing = content is not None
         reason = ""
 
-        if use_mock:
-            content = mock_fulltext(doi)
+        if content is not None:
+            reason = "Markdown existant valide réutilisé sans nouveau téléchargement"
+        elif use_mock:
+            content = mock_fulltext(doc)
             reason = "mock — texte simulé pour test"
-        elif doi in oa_urls:
+        elif oa_url:
             # Télécharger et parser le PDF OA
-            print(f"    📥 Téléchargement {oa_urls[doi][:60]}...")
-            pdf_path = download_pdf(oa_urls[doi])
+            print(f"    📥 Téléchargement {oa_url[:60]}...")
+            pdf_path = download_pdf(oa_url)
             if pdf_path:
                 try:
                     content = parse_pdf_real(pdf_path)
-                    reason = f"PDF parsé avec pymupdf4llm (OA: {oa_urls[doi][:50]})"
+                    reason = f"PDF parsé avec pymupdf4llm (OA: {oa_url[:50]})"
                     os.unlink(pdf_path)  # Nettoie le fichier temporaire
                 except Exception as e:
                     reason = f"Parsing échoué: {e}"
@@ -356,7 +457,7 @@ def main(rid: str, use_mock: bool = False):
             dropzone_dir = f"{base}/inputs/pdfs"
             pdf_path = None
             if os.path.isdir(dropzone_dir):
-                doi_filename = doi.replace("/", "_") + ".pdf"
+                doi_filename = safe_document_filename(doc, identity_type) + ".pdf"
                 candidate = os.path.join(dropzone_dir, doi_filename)
                 if os.path.exists(candidate):
                     pdf_path = candidate
@@ -374,14 +475,23 @@ def main(rid: str, use_mock: bool = False):
             reason = f"Parsing quasi-vide ({len(content)} caractères — PDF scanné ou slides ?)"
 
         if content and len(content) > 500:
-            with open(md_path, "w", encoding="utf-8") as f:
-                f.write(content)
+            if not reused_existing:
+                with open(md_path, "w", encoding="utf-8") as f:
+                    f.write(content)
             print(f"  ✅ {doi_safe}.md  ({len(content)} caractères)")
-            log_decision(base, doi, "retrieved", reason, run_id)
+            log_decision(
+                base, doc, "retrieved", reason, run_id,
+                identity_type=identity_type, source_id=source_id,
+                oa_url=oa_url, actual_doi=actual_doi,
+            )
             success += 1
         else:
-            print(f"  ❌ {doi}  — {reason}")
-            log_decision(base, doi, "retrieval_failed", reason, run_id)
+            print(f"  ❌ {doc}  — {reason}")
+            log_decision(
+                base, doc, "retrieval_failed", reason, run_id,
+                identity_type=identity_type, source_id=source_id,
+                oa_url=oa_url, actual_doi=actual_doi,
+            )
             failed += 1
 
     # Mise à jour prisma.json
@@ -393,11 +503,9 @@ def main(rid: str, use_mock: bool = False):
     prisma["fulltext_assessed"] = success + failed
     prisma["fulltext_not_retrieved"] = failed
     prisma.pop("excluded_fulltext", None)
-    # Count .md files actually produced in sources/, not just the success counter,
-    # so prisma.json reflects what's really on disk.
-    prisma["fulltext_retrieved"] = len(
-        [f for f in os.listdir(sources_dir) if f.endswith(".md")]
-    ) if os.path.isdir(sources_dir) else 0
+    # Les compteurs portent uniquement sur les articles inclus dans ce run.
+    # Les anciens ou étrangers fichiers présents dans sources/ sont ignorés.
+    prisma["fulltext_retrieved"] = success
     with open(prisma_path, "w", encoding="utf-8") as f:
         json.dump(prisma, f, indent=2, ensure_ascii=False)
 

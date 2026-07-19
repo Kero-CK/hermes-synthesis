@@ -2,7 +2,7 @@
 """
 search.py — Récupère des articles candidats multi-sources pour Hermes Synthesis.
 
-Interroge les bases académiques (OpenAlex, + paper-search-mcp à venir),
+Interroge les bases académiques (OpenAlex, puis connecteurs API directs),
 fusionne les résultats, réconcilie avec la dropzone par DOI, et écrit
 candidates.csv avec provenance complète.
 
@@ -11,20 +11,25 @@ Usage:
   python3 search.py '<json>' --mock     # mode test avec données fictives
 
 JSON attendu:
-  {"id": "ma-revue", "queries": {"openalex": "...", "crossref": "..."}}
+  {"id": "ma-revue", "queries": {"openalex": {
+      "query_mode": "search",
+      "search": "climate adaptation",
+      "filter": "from_publication_date:2020-01-01"
+  }, "crossref": "..."}}
 
-  La requête openalex est passée telle quelle au paramètre `filter=` de
-  l'API OpenAlex (PAS `search=`) : elle doit donc être en syntaxe filter
-  structurée, pas du texte libre. Exemple valide :
-    "title.search:self-improving,title_and_abstract.search:LLM agent,from_publication_date:2022-01-01"
-  Voir https://docs.openalex.org/api-entities/works/filter-works pour la
-  syntaxe complète (title.search, title_and_abstract.search,
-  from_publication_date, etc., séparés par des virgules = ET logique).
+  Le format OpenAlex est un objet avec `query_mode: "search"`, `search`
+  et un `filter` facultatif ; il produit des paramètres `search=` et
+  `filter=` séparés. Les anciennes chaînes OpenAlex sont refusées.
+  Voir https://developers.openalex.org/guides/searching pour la syntaxe de
+  recherche et https://developers.openalex.org/api-reference/works pour la
+  référence des champs et filtres (séparés par des virgules = ET logique).
 
 Sources câblées :
-  - openalex : ~250M articles (docs.openalex.org). Nécessite une clé API
+  - openalex : catalogue multidisciplinaire OpenAlex. Nécessite une clé API
     depuis février 2026 — lue depuis OPENALEX_API_KEY dans l'environnement.
-  - crossref, pubmed : via paper-search-mcp (TODO)
+    Authentification, quotas et coûts :
+    https://developers.openalex.org/api-reference/authentication
+  - autres sources : via connecteurs API directs, ajoutés et validés une par une
 
 Le script ne prend AUCUNE décision de recherche : les requêtes sont déjà
 validées par l'humain en amont. Il fait l'exécution mécanique.
@@ -36,22 +41,164 @@ import json
 import os
 import sys
 from datetime import date, datetime, timezone
-from typing import Optional
+from typing import Callable, Literal, NotRequired, TypeAlias, TypedDict
+
+
+SearchStatus: TypeAlias = Literal["complete", "incomplete", "capped", "error"]
+SearchResult: TypeAlias = tuple[list[dict], int | None, SearchStatus, str]
+SourceQueryInput: TypeAlias = str | dict[str, object]
+
+
+class OpenAlexSearchQuery(TypedDict):
+    query_mode: Literal["search"]
+    search: str
+    filter: NotRequired[str]
+
+
+OpenAlexQueryInput: TypeAlias = OpenAlexSearchQuery
+SearchFunction: TypeAlias = Callable[[SourceQueryInput], SearchResult]
+
+
+class PreparedOpenAlexQuery(TypedDict):
+    query_mode: Literal["search"]
+    params: dict[str, str]
+
+
+VALID_SEARCH_STATUSES = frozenset({"complete", "incomplete", "capped", "error"})
+
+
+class ConnectorSpec(TypedDict):
+    search: SearchFunction
+    endpoint: str
+    api_version: str
+    query_mode: str
+
+
+class InvalidSearchContract(ValueError):
+    """Raised when a connector does not return the common four-field tuple."""
+
+
+class InvalidOpenAlexQuery(ValueError):
+    """Raised when an OpenAlex query is not in a supported input format."""
+
+
+_OPENALEX_QUERY_KEYS = frozenset({"query_mode", "search", "filter"})
+
+
+def validate_openalex_query(query: object) -> OpenAlexQueryInput:
+    """Validate the structured OpenAlex ``search=`` query object."""
+    if isinstance(query, str):
+        raise InvalidOpenAlexQuery(
+            "Requête OpenAlex invalide : une chaîne historique est refusée ; "
+            "un objet avec query_mode='search' et search= est requis. Voir "
+            "https://developers.openalex.org/guides/searching"
+        )
+
+    prefix = "Requête OpenAlex invalide"
+    if not isinstance(query, dict):
+        raise InvalidOpenAlexQuery(
+            f"{prefix} : un objet JSON avec query_mode='search' et search est requis"
+        )
+
+    unexpected = set(query) - _OPENALEX_QUERY_KEYS
+    if unexpected:
+        raise InvalidOpenAlexQuery(
+            f"{prefix} : champs supplémentaires interdits : {sorted(unexpected, key=str)}"
+        )
+
+    if "query_mode" not in query:
+        raise InvalidOpenAlexQuery(f"{prefix} : query_mode est obligatoire")
+    if query.get("query_mode") != "search":
+        raise InvalidOpenAlexQuery(
+            f"{prefix} : query_mode doit être exactement 'search'"
+        )
+
+    if "search" not in query:
+        raise InvalidOpenAlexQuery(f"{prefix} : search est obligatoire")
+    search_value = query.get("search")
+    if not isinstance(search_value, str):
+        raise InvalidOpenAlexQuery(f"{prefix} : search doit être une chaîne")
+    if not search_value.strip():
+        raise InvalidOpenAlexQuery(f"{prefix} : search ne peut pas être vide")
+
+    if "filter" in query:
+        filter_value = query.get("filter")
+        if not isinstance(filter_value, str):
+            raise InvalidOpenAlexQuery(f"{prefix} : filter doit être une chaîne")
+        if not filter_value.strip():
+            raise InvalidOpenAlexQuery(f"{prefix} : filter ne peut pas être vide")
+
+    return query
+
+
+def prepare_openalex_query(query: object) -> PreparedOpenAlexQuery:
+    """Return exact OpenAlex ``search=`` and optional ``filter=`` parameters."""
+    validated = validate_openalex_query(query)
+    params = {"search": validated["search"]}
+    if "filter" in validated:
+        params["filter"] = validated["filter"]
+    return {"query_mode": "search", "params": params}
+
+
+def serialize_query_for_csv(query: OpenAlexQueryInput) -> str:
+    """Serialize a validated structured query for candidates.csv provenance."""
+    validated = validate_openalex_query(query)
+    return json.dumps(
+        validated,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def serialize_source_query_for_csv(source: str, query: SourceQueryInput) -> str:
+    """Serialize provenance without coupling non-OpenAlex sources to OpenAlex."""
+    if source == "openalex":
+        return serialize_query_for_csv(query)
+    if isinstance(query, str):
+        return query
+    if isinstance(query, dict):
+        return json.dumps(
+            query,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    raise TypeError("La requête source doit être une chaîne ou un objet JSON")
+
+
+def _validate_search_result(source: str, result: object) -> SearchResult:
+    """Validate and return the common connector result contract."""
+    prefix = f"Source '{source}' : contrat de recherche invalide"
+    if not isinstance(result, tuple):
+        raise InvalidSearchContract(f"{prefix} : résultat attendu sous forme de tuple")
+    if len(result) != 4:
+        raise InvalidSearchContract(f"{prefix} : tuple à 4 éléments requis")
+
+    results, expected_count, status, reason = result
+    if not isinstance(results, list):
+        raise InvalidSearchContract(f"{prefix} : results doit être une liste")
+    if expected_count is not None and (
+        isinstance(expected_count, bool)
+        or not isinstance(expected_count, int)
+        or expected_count < 0
+    ):
+        raise InvalidSearchContract(
+            f"{prefix} : expected_count doit être None ou un entier supérieur ou égal à zéro"
+        )
+    if not isinstance(status, str) or status not in VALID_SEARCH_STATUSES:
+        raise InvalidSearchContract(
+            f"{prefix} : status doit appartenir à {sorted(VALID_SEARCH_STATUSES)}"
+        )
+    if not isinstance(reason, str):
+        raise InvalidSearchContract(f"{prefix} : reason doit être une chaîne")
+
+    return results, expected_count, status, reason
 
 
 # ---------------------------------------------------------------------------
 # Recherche réelle — OpenAlex (clé API requise depuis février 2026)
 # ---------------------------------------------------------------------------
-
-
-def _looks_like_filter_syntax(query: str) -> bool:
-    """
-    Heuristique : une requête filter OpenAlex valide contient au moins un
-    champ structuré du type `champ.search:...` ou `champ:...`
-    (ex. title.search:, from_publication_date:). Du texte libre sans ':'
-    n'est jamais une syntaxe filter valide et provoquerait un HTTP 400.
-    """
-    return ":" in query
 
 
 def _reconstruct_abstract(inverted_index: dict | None) -> str:
@@ -82,28 +229,31 @@ def _clean_doi(doi_url: str) -> str:
     return doi_url.replace("https://doi.org/", "")
 
 
-def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[dict], int, str, str]:
+def _openalex_search(query: SourceQueryInput, max_results: int | None = None) -> SearchResult:
     """
     Interroge l'API OpenAlex et retourne (results, expected_count, status, status_reason).
 
     status ∈ {"complete", "incomplete", "capped", "error"}
 
     Clé API requise depuis février 2026 (lue depuis OPENALEX_API_KEY).
-    Rate limit : 10 req/s (pool courtois), 100k/jour. Docs : https://docs.openalex.org/
+    Clé API requise ; quotas et coûts consultables dans les en-têtes de réponse
+    et la documentation officielle.
+    Documentation : https://developers.openalex.org/api-reference/authentication
 
-    `query` est passée telle quelle au paramètre `filter=` de l'API — elle
-    doit être en syntaxe filter structurée (ex. "title.search:X,from_publication_date:2023-01-01"),
-    pas du texte libre. Une requête sans syntaxe filter reconnaissable est
-    rejetée avant l'appel réseau plutôt que de provoquer un HTTP 400 opaque.
+    Un objet structuré utilise `search=` et, s'il existe, `filter=` séparément.
+    Toute chaîne historique et toute autre requête invalide sont rejetées avant
+    le réseau.
 
-    Pagination par page (per_page=200) jusqu'à épuisement.
+    Pagination par page (per_page=100) jusqu'à épuisement.
     Garde-fou : arrêt à 2000 résultats avec avertissement.
-    Retry avec backoff exponentiel (1s, 2s, 4s, 4 tentatives max) sur HTTP 429.
-    Utilise UNPAYWALL_EMAIL pour le pool courtois (fallback sur mailto générique).
+    Retry avec backoff exponentiel (1s, 2s, 4s, 4 tentatives max) sur HTTP 429
+    et les erreurs serveur temporaires (500, 502, 503, 504).
+    Utilise UNPAYWALL_EMAIL comme adresse de contact dans le User-Agent
+    (fallback sur mailto générique).
 
     Returns:
         results: liste d'articles standardisés
-        expected_count: meta.count annoncé par OpenAlex (0 si inconnu)
+        expected_count: meta.count annoncé par OpenAlex (None si inconnu)
         status: "complete" | "incomplete" | "capped" | "error"
         status_reason: description humaine du statut
     """
@@ -111,26 +261,19 @@ def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[d
     import urllib.parse
     import time
 
-    if not _looks_like_filter_syntax(query):
-        print(
-            "  ❌ Requête OpenAlex invalide : ceci ressemble à du texte libre, "
-            "pas à une syntaxe filter.\n"
-            "     Le paramètre filter= d'OpenAlex exige une syntaxe structurée, "
-            "ex. :\n"
-            '     "title.search:self-improving,title_and_abstract.search:LLM agent,'
-            'from_publication_date:2022-01-01"\n'
-            "     Voir https://docs.openalex.org/api-entities/works/filter-works",
-            file=sys.stderr,
-        )
-        return [], 0, "error", "requête invalide : pas de syntaxe filter (texte libre détecté)"
+    try:
+        prepared_query = prepare_openalex_query(query)
+    except InvalidOpenAlexQuery as exc:
+        print(f"  ❌ {exc}", file=sys.stderr)
+        return [], None, "error", str(exc)
 
     courteous_email = os.environ.get("UNPAYWALL_EMAIL", "hermes-synthesis@example.org")
     api_key = os.environ.get("OPENALEX_API_KEY", "")
 
     all_results = []
-    expected_count = 0
+    expected_count = None
     page = 1
-    per_page = 200
+    per_page = 100
     hard_limit = int(os.environ.get("HARD_LIMIT", "2000"))
     fatal_error = False
     status = "complete"
@@ -140,9 +283,10 @@ def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[d
     cursor = None
     max_cursor_pages = 500
     count_checked = False
+    invalid_expected_count = False
 
     while True:
-        base_params = {"filter": query, "per_page": per_page}
+        base_params = {**prepared_query["params"], "per_page": per_page}
         if api_key:
             base_params["api_key"] = api_key
         if use_cursor:
@@ -164,11 +308,15 @@ def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[d
                 break  # succès → sort de la boucle retry
             except urllib.error.HTTPError as e:
                 last_error_code = e.code
-                if e.code in (429, 502, 503, 504):
-                    delay = 2 ** attempt  # 1s, 2s, 4s, 8s
-                    print(f"  ⚠️  HTTP {e.code} — tentative {attempt + 1}/{max_retries}, "
-                          f"retry dans {delay}s...", file=sys.stderr)
-                    time.sleep(delay)
+                if e.code in (429, 500, 502, 503, 504):
+                    if attempt < max_retries - 1:
+                        delay = 2 ** attempt  # 1s, 2s, 4s
+                        print(f"  ⚠️  HTTP {e.code} — tentative {attempt + 1}/{max_retries}, "
+                              f"retry dans {delay}s...", file=sys.stderr)
+                        time.sleep(delay)
+                    else:
+                        print(f"  ⚠️  HTTP {e.code} — tentative {attempt + 1}/{max_retries} "
+                              "(dernier essai).", file=sys.stderr)
                 else:
                     # 4xx = vraie erreur, pas de retry
                     print(f"  ❌ OpenAlex HTTP {e.code}: {e}", file=sys.stderr)
@@ -194,16 +342,34 @@ def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[d
         if fatal_error:
             break
 
-        meta = data.get("meta", {})
-        if not count_checked:
+        raw_meta = data.get("meta", {}) if isinstance(data, dict) else {}
+        meta = raw_meta if isinstance(raw_meta, dict) else {}
+        raw_count = meta.get("count") if isinstance(raw_meta, dict) else None
+        count_is_valid = (
+            not isinstance(raw_count, bool)
+            and isinstance(raw_count, int)
+            and raw_count >= 0
+        )
+        if not count_is_valid:
+            if not count_checked:
+                expected_count = None
+            invalid_expected_count = True
+            status = "incomplete"
+            status_reason = "missing_or_invalid_expected_count"
+        elif not count_checked:
             count_checked = True
-            expected_count = meta.get("count", 0)
-            if expected_count > 10000:
+            expected_count = raw_count
+            if expected_count is not None and expected_count > 10000:
                 use_cursor = True
                 continue
 
-        results = data.get("results", [])
+        results = data.get("results", []) if isinstance(data, dict) else []
         if not results:
+            if expected_count is not None and expected_count == 0 and status == "complete":
+                status_reason = "zero_results"
+            elif expected_count is None:
+                status = "incomplete"
+                status_reason = "missing_or_invalid_expected_count"
             break
 
         for w in results:
@@ -213,12 +379,22 @@ def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[d
             all_results.append({
                 "title": w.get("title", ""),
                 "doi": _clean_doi(w.get("doi", "")),
+                "source_id": w.get("id", ""),
                 "year": str(w.get("publication_year", "")),
                 "abstract": abstract,
                 "oa_url": oa_info.get("oa_url", ""),
             })
 
+        if invalid_expected_count:
+            break
+
         if len(all_results) >= hard_limit:
+            if (
+                expected_count is not None
+                and expected_count == hard_limit
+                and len(all_results) >= expected_count
+            ):
+                break
             print(f"  ⚠️  Plafond de sécurité {hard_limit} atteint.", file=sys.stderr)
             status = "capped"
             status_reason = f"arrêt volontaire à {hard_limit} (requête trop large)"
@@ -243,36 +419,50 @@ def _openalex_search(query: str, max_results: int | None = None) -> tuple[list[d
         if fatal_error:
             status = "error"
             status_reason = status_reason or "erreur fatale non spécifiée"
-        elif expected_count > 0 and len(all_results) < expected_count:
+        elif (
+            expected_count is not None
+            and expected_count > 0
+            and len(all_results) < expected_count
+        ):
             status = "incomplete"
             status_reason = (f"récupéré {len(all_results)}/{expected_count} "
                             f"(manque {expected_count - len(all_results)})")
-        elif len(all_results) >= hard_limit:
+        elif (
+            len(all_results) >= hard_limit
+            and not (expected_count is not None
+                     and expected_count == hard_limit
+                     and len(all_results) >= expected_count)
+        ):
             status = "capped"
             status_reason = f"plafond {hard_limit} atteint"
 
     return all_results[:hard_limit], expected_count, status, status_reason
 
 
-def mcp_search(source: str, query: str) -> tuple[list[dict], int, str, str]:
-    """
-    Interroge une source de recherche académique.
-    Retourne (results, expected_count, is_complete).
+CONNECTOR_REGISTRY: dict[str, ConnectorSpec] = {
+    "openalex": {
+        "search": _openalex_search,
+        "endpoint": "https://api.openalex.org/works",
+        "api_version": "unversioned",
+        "query_mode": "search",
+    },
+}
 
-    Sources supportées :
-      - openalex : ≈250M articles, clé API requise depuis février 2026 (OPENALEX_API_KEY)
-      - crossref  : TODO (API gratuite, métadonnées DOI)
-      - pubmed    : TODO (via paper-search-mcp)
 
-    Pour les sources non encore câblées, bascule sur --mock.
-    """
-    if source == "openalex":
-        return _openalex_search(query)
-    else:
+def search_source(source: str, query: SourceQueryInput) -> SearchResult:
+    """Interroge une seule source via le registre et valide son résultat."""
+    spec = CONNECTOR_REGISTRY.get(source)
+    if spec is None:
         raise NotImplementedError(
             f"Source '{source}' pas encore câblée. Sources disponibles : openalex.\n"
             f"Utilise --mock pour tester le pipeline en attendant."
         )
+    result = spec["search"](query)
+    return _validate_search_result(source, result)
+
+
+# Compatibilité rétroactive pour les appelants historiques.
+mcp_search = search_source
 
 
 # ---------------------------------------------------------------------------
@@ -357,10 +547,15 @@ MOCK_DATA = {
 }
 
 
-def mock_search(source: str, query: str) -> tuple[list[dict], int, str, str]:
+def mock_search(source: str, query: SourceQueryInput) -> SearchResult:
     """Retourne des données mock pour une source donnée (toujours complet)."""
+    if source == "openalex":
+        try:
+            validate_openalex_query(query)
+        except InvalidOpenAlexQuery as exc:
+            return [], None, "error", str(exc)
     results = MOCK_DATA.get(source, [])
-    return results, len(results), "complete", "mock"
+    return _validate_search_result(source, (results, len(results), "complete", "mock"))
 
 
 # ---------------------------------------------------------------------------
@@ -394,11 +589,53 @@ def reconcile_dropzone(rows: list[dict], pdf_dir: str) -> list[dict]:
     return rows
 
 
+STATUS_PRIORITY = {"error": 0, "incomplete": 1, "capped": 2, "complete": 3}
+REVERSE_STATUS_PRIORITY = {value: key for key, value in STATUS_PRIORITY.items()}
+
+
+def _query_mode_for_manifest(source: str, query: object) -> str:
+    """Detect the per-request mode without changing connector metadata."""
+    if source != "openalex":
+        spec = CONNECTOR_REGISTRY.get(source)
+        return spec["query_mode"] if spec is not None else "unknown"
+    try:
+        return prepare_openalex_query(query)["query_mode"]
+    except InvalidOpenAlexQuery:
+        return "unknown"
+
+
+def _connector_metadata(source: str, query_mode: str | None = None) -> dict[str, str]:
+    """Return manifest metadata for a source, with explicit unknown defaults."""
+    spec = CONNECTOR_REGISTRY.get(source)
+    if spec is None:
+        return {"endpoint": "", "api_version": "unknown", "query_mode": "unknown"}
+    metadata = {
+        "endpoint": spec["endpoint"],
+        "api_version": spec["api_version"],
+        "query_mode": query_mode if query_mode is not None else spec["query_mode"],
+    }
+    return metadata
+
+
+def _global_search_status(search_meta: dict[str, dict]) -> str:
+    """Return the worst status; unknown values fail closed as ``error``."""
+    global_priority = min(
+        (
+            STATUS_PRIORITY.get(metadata.get("status"), STATUS_PRIORITY["error"])
+            if isinstance(metadata.get("status"), str)
+            else STATUS_PRIORITY["error"]
+            for metadata in search_meta.values()
+        ),
+        default=STATUS_PRIORITY["complete"],
+    )
+    return REVERSE_STATUS_PRIORITY[global_priority]
+
+
 # ---------------------------------------------------------------------------
 # Point d'entrée
 # ---------------------------------------------------------------------------
 
-def main(rid: str, queries: dict[str, str], use_mock: bool = False):
+def main(rid: str, queries: dict[str, SourceQueryInput], use_mock: bool = False):
     base = f"/reviews/{rid}"
     today = date.today().isoformat()
 
@@ -408,49 +645,82 @@ def main(rid: str, queries: dict[str, str], use_mock: bool = False):
         print("   Lance d'abord la skill protocol.", file=sys.stderr)
         sys.exit(1)
 
+    # Refuse les anciennes chaînes OpenAlex avant tout appel de connecteur ou
+    # écriture de sortie. Les futurs connecteurs gardent leur entrée générique;
+    # les objets OpenAlex invalides suivent le chemin d'erreur du connecteur.
+    for source, query in queries.items():
+        if source == "openalex" and isinstance(query, str):
+            try:
+                validate_openalex_query(query)
+            except InvalidOpenAlexQuery as exc:
+                print(f"❌ {exc}", file=sys.stderr)
+                raise
+
     # TODO: read the year window from protocol.md and inject it into the
     # OpenAlex filter (from_publication_date) automatically, instead of
     # relying on a well-formed query passed in by hand. Skipped for now —
     # low priority, adds complexity/risk for a run that already works.
     search_fn = mock_search if use_mock else mcp_search
     rows: list[dict] = []
-    search_meta: dict[str, dict] = {}  # source → {retrieved, expected, status, reason}
+    search_meta: dict[str, dict] = {}  # source → connector metadata + counters/status
 
     for source, query in queries.items():
+        query_mode = _query_mode_for_manifest(source, query)
         print(f"🔍 Recherche {source} : {query}")
         try:
-            results, expected, status, reason = search_fn(source, query)
+            raw_result = search_fn(source, query)
+            results, expected, status, reason = _validate_search_result(source, raw_result)
+        except InvalidSearchContract as e:
+            print(f"❌ {e}", file=sys.stderr)
+            search_meta[source] = {
+                **_connector_metadata(source, query_mode),
+                "retrieved": 0,
+                "expected": None,
+                "status": "error",
+                "reason": str(e),
+            }
+            continue
         except NotImplementedError as e:
             print(f"⚠️  {e}", file=sys.stderr)
-            search_meta[source] = {"retrieved": 0, "expected": 0, "status": "error", "reason": str(e)}
+            search_meta[source] = {
+                **_connector_metadata(source, query_mode),
+                "retrieved": 0,
+                "expected": None,
+                "status": "error",
+                "reason": str(e),
+            }
             continue
 
         search_meta[source] = {
+            **_connector_metadata(source, query_mode),
             "retrieved": len(results),
             "expected": expected,
             "status": status,
             "reason": reason
         }
 
-        for item in results:
-            rows.append({
-                "title": item.get("title", ""),
-                "doi": item.get("doi", ""),
-                "year": str(item.get("year", "")),
-                "abstract": item.get("abstract", ""),
-                "oa_url": item.get("oa_url", ""),
-                "pdf_status": "",  # rempli par reconcile_dropzone
-                "source": source,
-                "query": query,
-                "date": today,
-            })
+        if results:
+            query_provenance = serialize_source_query_for_csv(source, query)
+            for item in results:
+                rows.append({
+                    "title": item.get("title", ""),
+                    "doi": item.get("doi", ""),
+                    "source_id": item.get("source_id", ""),
+                    "year": str(item.get("year", "")),
+                    "abstract": item.get("abstract", ""),
+                    "oa_url": item.get("oa_url", ""),
+                    "pdf_status": "",  # rempli par reconcile_dropzone
+                    "source": source,
+                    "query": query_provenance,
+                    "date": today,
+                })
 
     # Réconciliation dropzone
     rows = reconcile_dropzone(rows, f"{base}/inputs/pdfs")
 
     # Écriture candidates.csv
     cols = [
-        "title", "doi", "year", "abstract", "oa_url", "pdf_status",
+        "title", "doi", "source_id", "year", "abstract", "oa_url", "pdf_status",
         "source", "query", "date",
     ]
     csv_path = f"{base}/candidates.csv"
@@ -476,13 +746,7 @@ def main(rid: str, queries: dict[str, str], use_mock: bool = False):
     else:
         manifest = {"id": rid}
     # Statut global : le pire des statuts par source
-    status_priority = {"error": 0, "incomplete": 1, "capped": 2, "complete": 3}
-    global_priority = min(
-        (status_priority.get(m.get("status", "complete"), 3) for m in search_meta.values()),
-        default=3
-    )
-    reverse_status = {v: k for k, v in status_priority.items()}
-    global_status = reverse_status[global_priority]
+    global_status = _global_search_status(search_meta)
 
     manifest["stage"] = "search_done"
     manifest["queries"] = queries

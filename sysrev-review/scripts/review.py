@@ -27,6 +27,21 @@ import sys
 from datetime import datetime, timezone
 
 
+def case_identity(case: dict) -> tuple[str, str] | None:
+    """Retourne l'identité stable d'un cas, sans jamais accepter une valeur vide."""
+    if case.get("doc"):
+        kind = case.get("identity_type", "") or "doc"
+        if isinstance(case["doc"], str) and case["doc"].strip():
+            return kind, case["doc"].strip()
+        return None
+    for kind in ("doi", "source_id", "oa_url"):
+        raw_value = case.get(kind, "")
+        value = raw_value.strip() if isinstance(raw_value, str) else ""
+        if value:
+            return kind, value
+    return None
+
+
 def resolve_screening_decisions(entries: list[dict]) -> dict[str, str]:
     """Résout l'éligibilité finale avec priorité aux décisions humaines."""
     machine: dict[str, str] = {}
@@ -66,7 +81,11 @@ def apply_decisions(rid: str, decisions: dict):
         print("✅ Aucun cas ambigu — rien à appliquer.")
         return
 
-    cases_by_doi = {c.get("doi"): c for c in cases if c.get("doi")}
+    cases_by_identity = {
+        identity[1]: case
+        for case in cases
+        if (identity := case_identity(case)) is not None
+    }
 
     existing_entries = []
     if os.path.exists(decisions_path):
@@ -89,7 +108,7 @@ def apply_decisions(rid: str, decisions: dict):
             print(f"⚠️  Décision invalide pour '{key}' : {decision!r} (ignorée)", file=sys.stderr)
             continue
 
-        case = cases_by_doi.get(key)
+        case = cases_by_identity.get(key)
         if case is None:
             try:
                 idx = int(key) - 1
@@ -101,13 +120,20 @@ def apply_decisions(rid: str, decisions: dict):
             print(f"⚠️  Cas introuvable pour la clé '{key}' (ignorée)", file=sys.stderr)
             continue
 
-        doc = case.get("doi", "")
+        identity = case_identity(case)
+        if identity is None:
+            print(
+                f"❌ Cas sans identité pour la clé '{key}' : décision refusée.",
+                file=sys.stderr,
+            )
+            continue
+        identity_type, doc = identity
         handled += 1
         if doc and latest_human.get(doc) == decision:
             print(f"⚠️  Décision humaine déjà journalisée pour {doc} — rejeu ignoré")
             continue
 
-        entries.append({
+        entry = {
             "ts": now,
             "run": now,
             "doc": doc,
@@ -117,7 +143,15 @@ def apply_decisions(rid: str, decisions: dict):
             "model": "human",
             "actor": "human",
             "reason": case.get("reason", "décision humaine via review apply"),
-        })
+        }
+        if identity_type != "doi":
+            entry.update({
+                "identity_type": identity_type,
+                "doi": "",
+                "source_id": case.get("source_id", ""),
+                "oa_url": case.get("oa_url", ""),
+            })
+        entries.append(entry)
         if decision == "include":
             included_manual += 1
         else:
@@ -135,10 +169,11 @@ def apply_decisions(rid: str, decisions: dict):
 
     all_entries = existing_entries + entries
     final_decisions = resolve_screening_decisions(all_entries)
-    remaining_cases = [
-        case for case in cases
-        if not case.get("doi") or case.get("doi") not in latest_human
-    ]
+    remaining_cases = []
+    for case in cases:
+        identity = case_identity(case)
+        if identity is None or identity[1] not in latest_human:
+            remaining_cases.append(case)
 
     # Mise à jour prisma.json depuis l'état final du journal
     prisma = json.load(open(prisma_path, encoding="utf-8")) if os.path.exists(prisma_path) else {}
@@ -185,14 +220,15 @@ def main(rid: str):
         print("✅ Aucun cas ambigu — le screening est terminé.")
         return
 
-    # Index des abstracts par DOI
-    doi_to_abstract = {}
+    # Index des abstracts par identité
+    identity_to_abstract = {}
     if os.path.exists(csv_path):
         with open(csv_path, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
-                doi = row.get("doi", "")
-                if doi:
-                    doi_to_abstract[doi] = row.get("abstract", "")
+                for key in ("doi", "source_id", "oa_url"):
+                    value = row.get(key, "")
+                    if value:
+                        identity_to_abstract[value] = row.get("abstract", "")
 
     print(f"🤔 {len(cases)} cas à trancher. Pour chacun, réponds include ou exclude :\n")
 
@@ -200,8 +236,9 @@ def main(rid: str):
         title = case.get("title", "Article sans titre")
         score = case.get("score", "?")
         reason = case.get("reason", "")
-        doi = case.get("doi", "")
-        abstract = doi_to_abstract.get(doi, case.get("abstract", ""))[:250]
+        identity = case_identity(case)
+        doc = identity[1] if identity is not None else ""
+        abstract = identity_to_abstract.get(doc, case.get("abstract", ""))[:250]
 
         print(f"{i}. {title}")
         print(f"   Score IA : {score}")

@@ -55,6 +55,25 @@ def validate_protocol_file(protocol_path: str) -> None:
         sys.exit(1)
 
 
+def validate_search_status(manifest: dict) -> None:
+    """Allow screening only for a corpus explicitly marked complete."""
+    missing = object()
+    status = manifest.get("search_status", missing)
+    if status == "complete":
+        return
+
+    status_label = "<absent>" if status is missing else repr(status)
+    message = (
+        f"❌ Screening refusé : search_status={status_label}. "
+        "Le corpus ne peut pas être screené comme s'il était complet. "
+        "Corrige ou relance la recherche avant de continuer."
+    )
+    if status == "capped":
+        message += " Pour capped, augmente HARD_LIMIT puis relance la recherche."
+    print(message, file=sys.stderr)
+    sys.exit(1)
+
+
 # ---------------------------------------------------------------------------
 # Évaluation réelle via LLM (API compatible OpenAI)
 # ---------------------------------------------------------------------------
@@ -243,12 +262,23 @@ def decide(score: float, threshold_include: float, threshold_exclude: float) -> 
         return "needs_manual"
 
 
+def article_identity(article: dict) -> tuple[str, str] | None:
+    """Retourne l'identité stable d'un candidat, dans l'ordre contractuel."""
+    for kind in ("doi", "source_id", "oa_url"):
+        raw_value = article.get(kind, "")
+        value = raw_value.strip() if isinstance(raw_value, str) else ""
+        if value:
+            return kind, value
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Journalisation
 # ---------------------------------------------------------------------------
 
 def log_decision(base: str, doi: str, decision: str, score: float, reason: str,
-                 run_id: str, model: str = "mock@test"):
+                 run_id: str, model: str = "mock@test", *,
+                 identity_type: str = "doi", source_id: str = "", oa_url: str = ""):
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "run": run_id,
@@ -260,6 +290,13 @@ def log_decision(base: str, doi: str, decision: str, score: float, reason: str,
         "actor": "ai",
         "reason": reason,
     }
+    if identity_type != "doi":
+        entry.update({
+            "identity_type": identity_type,
+            "doi": "",
+            "source_id": source_id,
+            "oa_url": oa_url,
+        })
     with open(f"{base}/decisions.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
@@ -287,6 +324,7 @@ def main(rid: str, threshold_include: float = 0.75,
     validate_protocol_file(protocol_path)
 
     manifest = json.load(open(manifest_path, encoding="utf-8"))
+    validate_search_status(manifest)
     protected_stages = {"review_done", "fulltext_done", "extract_done", "report_done"}
     if manifest.get("stage") in protected_stages and not force:
         print(
@@ -309,6 +347,17 @@ def main(rid: str, threshold_include: float = 0.75,
     if not candidates:
         print("⚠️  Aucun candidat à screener.")
         return
+
+    identities: list[tuple[str, str]] = []
+    for index, article in enumerate(candidates, 1):
+        identity = article_identity(article)
+        if identity is None:
+            print(
+                f"❌ Candidat {index} sans identité : DOI, source_id ou oa_url requis.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        identities.append(identity)
 
     # Lecture des critères depuis protocol.md
     criteria_include: list[str] = []
@@ -344,12 +393,12 @@ def main(rid: str, threshold_include: float = 0.75,
     print(f"   Seuil include ≥ {threshold_include}  |  Seuil exclude ≤ {threshold_exclude}")
     print()
 
-    for i, article in enumerate(candidates, 1):
+    for i, (article, (identity_type, identity_value)) in enumerate(zip(candidates, identities), 1):
         title = article.get("title", "")
         abstract = article.get("abstract", "")
         doi = article.get("doi", "")
 
-        result = screen_fn(title, abstract, doi, criteria_include, criteria_exclude)
+        result = screen_fn(title, abstract, identity_value, criteria_include, criteria_exclude)
         score = result["score"]
         reason = result["reason"]
         model_used = result.get("model", "unknown")
@@ -357,17 +406,36 @@ def main(rid: str, threshold_include: float = 0.75,
             api_errors += 1
         decision = decide(score, threshold_include, threshold_exclude)
 
-        log_decision(base, doi, decision, score, reason, run_id, model=model_used)
+        log_decision(
+            base,
+            identity_value,
+            decision,
+            score,
+            reason,
+            run_id,
+            model=model_used,
+            identity_type=identity_type,
+            source_id=article.get("source_id", ""),
+            oa_url=article.get("oa_url", ""),
+        )
         counts[decision] += 1
 
         if decision == "needs_manual":
-            to_review.append({
+            review_item = {
                 "title": title,
                 "doi": doi,
                 "score": score,
                 "reason": reason,
                 "abstract": abstract[:300],
-            })
+            }
+            if identity_type != "doi":
+                review_item.update({
+                    "source_id": article.get("source_id", ""),
+                    "oa_url": article.get("oa_url", ""),
+                    "doc": identity_value,
+                    "identity_type": identity_type,
+                })
+            to_review.append(review_item)
 
         emoji = {"include": "✅", "exclude": "❌", "needs_manual": "🤔"}[decision]
         print(f"  {emoji} [{i}/{len(candidates)}] {decision:14s} score={score:.2f}  {title[:70]}...")

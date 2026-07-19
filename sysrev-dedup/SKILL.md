@@ -21,8 +21,9 @@ requires:
 
 # Objectif
 
-Identifier et fusionner les doublons dans `candidates.csv` en deux passes :
-DOI exact (certain) puis similarité de titre (fuzzy). Produire un fichier
+Identifier et fusionner les doublons dans `candidates.csv` en trois passes :
+identité exacte, titre normalisé identique, puis similarité de titre sous
+garde-fous. Produire un fichier
 dédupliqué propre et tracer toutes les fusions pour l'audit.
 
 # Pré-conditions
@@ -50,8 +51,11 @@ dédupliqué propre et tracer toutes les fusions pour l'audit.
 
 3. Le script :
    - Sauvegarde `candidates.csv` en `candidates_raw.csv` (backup)
-   - Passe 1 : fusionne les DOI identiques
-   - Passe 2 : fusionne les titres similaires (ratio ≥ threshold)
+   - Passe 1 : fusionne les DOI, `source_id` ou `oa_url` identiques
+   - Passe 2 : fusionne les titres normalisés identiques si les années sont
+     identiques, voisines ou absentes
+   - Passe 3 : fusionne les titres similaires (ratio ≥ threshold) seulement si
+     les années sont compatibles et qu'au moins un DOI manque
    - Pour chaque fusion, conserve la ligne la plus complète (priorité :
      abstract présent > oa_url présent > date la plus récente)
    - Journalise chaque fusion dans `decisions.jsonl`
@@ -68,22 +72,28 @@ dédupliqué propre et tracer toutes les fusions pour l'audit.
   dans `decisions.jsonl`.
 - **Backup systématique.** `candidates_raw.csv` est la version pré-dédup,
   conservée pour tout audit.
+- **Versions d'un même article.** La normalisation des titres ignore la casse,
+  la ponctuation et les espaces multiples. Un titre identique peut donc réunir
+  une version preprint et une version publiée malgré des identifiants différents,
+  si leurs années sont identiques ou voisines (ou si une année manque).
+- **Garde-fou fuzzy.** Une similarité approximative ne fusionne jamais deux
+  DOI différents ; elle exige qu'au moins un DOI soit absent et que les années
+  soient compatibles.
+- **Audit générique.** Chaque fusion conserve la ligne la plus complète et
+  journalise l'identité gardée, `merged_ids`, `merged_sources` et le score
+  éventuel. `merged_dois` reste écrit pour compatibilité avec les anciens
+  lecteurs ; les anciens journaux ne sont pas réécrits.
 - **Seuil raisonnable.** 0.85 par défaut. Ne pas descendre sous 0.75 sans
   alerter l'utilisateur (risque de faux positifs).
 - Si aucun doublon trouvé, c'est normal : le script le signale sans erreur.
 
 # Pièges connus
 
-- **O(n²) — similarité de titres explosive sur gros corpus.** La passe 2
-  (similarité de titre) compare chaque titre à tous les autres → O(n²).
+- **O(n²) — comparaison de titres explosive sur gros corpus.** La passe fuzzy
+  compare les titres à tous les autres → O(n²).
   Pour 500 lignes : ~1 min. Pour 2000 lignes : ~1 heure (paralysant).
-  **Quand `candidates.csv` dépasse 1000 lignes**, faire exclusivement une
-  déduplication DOI (passe 1) et sauter la similarité de titres. La quasi-totalité
-  des doublons inter-sources sont des DOI identiques ; les doublons de titre
-  sans DOI commun sont rarissimes. Pour une comparaison broad-vs-narrow
-  (étape intermédiaire), la dédup DOI-only est amplement suffisante.
-  Faire la dédup titres en différé, sur le corpus final screené (beaucoup
-  plus petit).
+  **Quand `candidates.csv` dépasse 1000 lignes**, évaluer avec prudence la
+  passe fuzzy et la réaliser de préférence sur le corpus final screené.
 
   **DOI-only dedup rapide :**
   ```python
@@ -105,9 +115,12 @@ dédupliqué propre et tracer toutes les fusions pour l'audit.
 
 Chaque fusion génère une ligne dans `decisions.jsonl` :
 ```json
-{"ts":"...","doc":"DOI_gardé","stage":"dedup","decision":"merge",
+{"ts":"...","doc":"10.xxx/a","identity_type":"doi",
+ "stage":"dedup","decision":"merge",
+ "merged_ids":["10.xxx/a","https://openalex.org/W1"],
+ "merged_sources":["manual","openalex"],
  "merged_dois":["10.xxx/a"],
- "reason":"DOI exact match — 2 copies fusionnées (sources: openalex, manual)"}
+ "reason":"titre normalisé identique — 2 versions fusionnées (années compatibles)"}
 ```
 
 Mise à jour :

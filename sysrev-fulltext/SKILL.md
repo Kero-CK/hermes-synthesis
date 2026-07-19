@@ -11,7 +11,8 @@ inputs:
   - /reviews/<id>/manifest.json (stage = "screen_done" ou "review_done")
 outputs:
   - /reviews/<id>/sources/<doi_safe>.md (un fichier par article inclus)
-  - prisma.json ("fulltext_assessed", "fulltext_not_retrieved") mis à jour
+  - prisma.json ("fulltext_assessed", "fulltext_retrieved",
+    "fulltext_not_retrieved") mis à jour
   - manifest.json mis à jour
 requires:
   env: []
@@ -54,6 +55,8 @@ suivantes (extraction notamment).
    - Cherche le PDF : URL open access d'abord, dropzone ensuite
    - Parse le PDF en Markdown (via `pymupdf4llm` en mode réel)
    - Écrit le résultat dans `sources/<doi_safe>.md`
+   - Réutilise sans téléchargement un Markdown déjà présent et de plus de 500
+     caractères, en journalisant un nouvel événement `retrieved` explicite
    - Si le parsing échoue, marque `retrieval_failed`
 
 4. Présente le résumé : combien récupérés, combien en échec.
@@ -66,6 +69,12 @@ suivantes (extraction notamment).
   noms de fichiers (`10.1234_mock001.md`).
 - **Chemin d'échec.** Parsing raté → `retrieval_failed` journalisé dans
   `decisions.jsonl`, jamais un trou silencieux.
+- **Relances et compteurs.** Le journal reste append-only. Les compteurs du run
+  ne comptent que les articles inclus dans ce run, jamais les fichiers anciens
+  ou étrangers présents dans `sources/`.
+- **Dernière entrée gagnante.** Pour une même identité, les consommateurs
+  résolvent les événements `fulltext` valides dans l'ordre des lignes : la
+  dernière entrée gagne, y compris lorsqu'il s'agit de `retrieval_failed`.
 
 # Journalisation
 
@@ -82,16 +91,17 @@ En cas d'échec :
 ```
 
 Mise à jour :
-- `prisma.json` : `fulltext_assessed`, `fulltext_not_retrieved`
+- `prisma.json` : `fulltext_assessed`, `fulltext_retrieved`,
+  `fulltext_not_retrieved`
 - `manifest.json` : `stage = "fulltext_done"`
 
 # Pièges connus
 
 - **Compatibilité des anciens journaux.** `screen_manual` est lu comme alias de
   `human_review`. Les anciens tuples `fulltext/include` et
-  `fulltext/needs_manual` restent reconnus comme `retrieved` et
-  `retrieval_failed`, mais les nouveaux événements utilisent uniquement le
-  vocabulaire canonique. Tout tuple inconnu est signalé et compté dans
+  `fulltext/retrieved` restent extractibles ; `fulltext/needs_manual` reste un
+  état bloquant. Les nouveaux événements utilisent uniquement le vocabulaire
+  canonique. Tout tuple inconnu est signalé et compté dans
   `manifest.json` sous `journal_unknown_entries`.
 - **Paywalls (403 Forbidden)** : de nombreux éditeurs (Elsevier, Springer, Wiley)
   bloquent le téléchargement automatisé. Les articles sans OA accessible

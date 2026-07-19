@@ -36,17 +36,20 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
 
 2. **Formule la requête par source.** Pour chaque source à interroger,
    convertis la question + critères en une requête structurée utilisable
-   par l'API de la source. Pour OpenAlex, le script transmet la valeur au
-   paramètre API `filter=` : il faut donc utiliser la syntaxe structurée des
-   filtres, et non une chaîne booléenne libre.
-   - Virgules entre filtres = ET logique.
-   - Utiliser les champs `.search`, par exemple `title.search:` ou
-     `title_and_abstract.search:`.
-   - Ajouter les bornes avec des filtres dédiés, par exemple
-     `from_publication_date:2020-01-01`.
-   - Exemple : `title_and_abstract.search:climate adaptation,from_publication_date:2020-01-01`.
-   - Faire valider la syntaxe avec la documentation OpenAlex :
-     https://docs.openalex.org/api-entities/works/filter-works
+   par l'API de la source. Pour OpenAlex, le script exige un objet avec
+   `query_mode = "search"` et transmet `search=` séparément de `filter=`.
+   - `search` contient la recherche booléenne exacte, avec parenthèses,
+     opérateurs et guillemets conservés tels quels.
+   - `filter` est facultatif ; il porte séparément les bornes de date, langue
+     et autres filtres structurés. Les virgules entre filtres signifient ET.
+   - Exemple :
+     `{"query_mode":"search","search":"(climate OR warming) AND adaptation","filter":"from_publication_date:2020-01-01"}`.
+   - Toute chaîne OpenAlex, tout ancien format ou tout champ supplémentaire
+     est refusé avant le réseau et aucune conversion automatique n'est faite.
+   - Faire valider la syntaxe avec le guide officiel OpenAlex :
+     https://developers.openalex.org/guides/searching
+   - Consulter la référence officielle Works pour les champs et filtres :
+     https://developers.openalex.org/api-reference/works
 
 3. **Fais valider les requêtes par l'utilisateur via `clarify`.** Montre
    chaque requête formatée et demande confirmation. Tant que l'utilisateur
@@ -64,10 +67,14 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
    ```json
    {
      "id": "adaptation-pme-2026",
-     "queries": {
-       "openalex": "title_and_abstract.search:SME climate adaptation,from_publication_date:2015-01-01",
-       "crossref": "SME climate adaptation France"
-     }
+      "queries": {
+        "openalex": {
+          "query_mode": "search",
+          "search": "SME climate adaptation",
+          "filter": "from_publication_date:2015-01-01"
+        },
+        "crossref": "SME climate adaptation France"
+      }
    }
    ```
 
@@ -91,8 +98,8 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
   l'humain, ne les change pas. Si une source ne retourne rien, le signaler
   sans inventer.
 - **Sci-Hub désactivé.** Ne pas utiliser ni proposer Sci-Hub.
-- **Épinglage de version.** Noter la version de paper-search-mcp utilisée
-  dans `manifest.json`.
+- **Épinglage de version.** Noter l'endpoint et la version de chaque API
+  source utilisée dans `manifest.json`.
 - **Symlink vault.** `/reviews` est un symlink vers le vault Obsidian.
   Les fichiers sont automatiquement dans le vault, pas besoin de copie.
 
@@ -109,10 +116,10 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
 
 # Pièges connus
 
-- **OpenAlex — `filter=`, pas une requête booléenne libre.** Une chaîne telle
-  que `(A OR B) AND C` n'est pas le contrat consommé par `search.py`. Fournir
-  au moins un champ structuré contenant `:`, puis séparer les filtres par des
-  virgules. Le script rejette le texte libre avant tout appel réseau.
+- **OpenAlex — `search=` et `filter=` séparés.** Fournir un objet avec
+  `query_mode = "search"` et un champ `search` non vide. Le champ `filter`
+  est facultatif et conserve les filtres structurés, séparés par des virgules.
+  Toute chaîne OpenAlex est refusée avant tout appel réseau et toute écriture.
 
 - **Tester la requête avant le script.** En cas de doute, lancer un appel
   API direct (curl ou Python one-liner) pour vérifier le compte de résultats
@@ -122,7 +129,7 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
   avait un `max_results=50` en dur dans `_openalex_search()` jusqu'en
   juin 2026. Toute revue antérieure peut être biaisée par ce plafond
   (marquée `plafond_biais` dans son `manifest.json`). Le script pagine
-  désormais jusqu'à épuisement (per_page=200). Le garde-fou est `HARD_LIMIT`
+  désormais jusqu'à épuisement (per_page=100). Le garde-fou est `HARD_LIMIT`
   (variable d'env, défaut 2000) — voir ci-dessous.
 
 - **HARD_LIMIT configurable.** Le plafond de sécurité se règle via
@@ -130,8 +137,9 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
   `export HARD_LIMIT=5000`. Si le plafond est atteint, `search_status = "capped"`
   (≠ "incomplete" : c'est un choix, pas un échec). On peut relancer avec
   un `HARD_LIMIT` plus haut sans risque de mélange (le CSV est réécrit en
-  mode `"w"`). **Note :** pagination cursor (filet de sécurité >10000)
-  inactive tant que `HARD_LIMIT < 10000`.
+  mode `"w"`). **Note :** le curseur peut être activé dès que
+  `meta.count > 10000`; un `HARD_LIMIT` inférieur arrête généralement la
+  collecte avant que le curseur ne soit utile.
 
 - **Pagination cursor au-delà de 10000 résultats.** La pagination par "page"
   plafonne à 10 000 résultats côté OpenAlex. Si `meta.count > 10000`, le
@@ -140,41 +148,46 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
   (flag `count_checked`), jamais re-basculée. La 1ère page (mode "page")
   est jetée (`continue` avant traitement) et re-récupérée en mode cursor
   → 0 doublon. Garde-fou anti-boucle infinie : `max_cursor_pages = 500`
-  (~100k résultats max).
+  (~50k résultats max avec `per_page=100`).
 
-- **UNPAYWALL_EMAIL pour le pool courtois OpenAlex.** Le script lit
+- **UNPAYWALL_EMAIL comme contact User-Agent.** Le script lit
   `UNPAYWALL_EMAIL` depuis l'environnement pour le header `User-Agent`
-  (`mailto:`). Sans cette variable, fallback sur `hermes-synthesis@example.org`
-  — le pool courtois standard est moins prioritaire. Configurer
-  `UNPAYWALL_EMAIL` identifie poliment le client ; ne pas promettre un débit
-  précis, les limites OpenAlex peuvent évoluer.
+  (`mailto:`). Sans cette variable, fallback sur `hermes-synthesis@example.org`.
+  Cette adresse sert uniquement de contact dans le User-Agent.
 
 - **HTTP 429/5xx — retry avec backoff exponentiel, JAMAIS sauter une page.**
-  Sur un 429 (rate limit), 502, 503, ou 504 (erreur serveur temporaire),
+  Sur un 429 (rate limit), 500, 502, 503, ou 504 (erreur serveur temporaire),
   le script réessaie la MÊME page avec un délai exponentiel :
-  1s → 2s → 4s → 8s (max 4 tentatives). Si les 4 tentatives échouent :
+  1s → 2s → 4s (max 4 tentatives, sans attente après le dernier essai).
+  Si les 4 tentatives échouent :
   `status = "incomplete"` et la raison inclut le code HTTP (`last_error_code`
   stocké dans le except, utilisé après la boucle — ne pas référencer `e`
   hors du bloc except). **Ne jamais** abandonner une page silencieusement
   et continuer → ça produirait un corpus partiel présenté comme complet.
 
 - **Détection d'incomplétude — 4 statuts distincts dans le manifest.**
-  `_openalex_search()` retourne `(results, expected_count, status, status_reason)`
+  `_openalex_search()` retourne `(results, expected_count, status, status_reason)`;
+  `expected_count` vaut `None` si le total OpenAlex n'est pas fiable.
   avec `status` ∈ {"complete", "incomplete", "capped", "error"}. Le statut
   global dans `manifest.json` est le pire des statuts par source
   (priorité error < incomplete < capped < complete).
 
   | Statut | Cause | CSV écrit? | Reprise? |
   |---|---|---|---|
-  | `complete` | `retrieved == expected` | oui | — |
+  | `complete` | `retrieved == expected` avec total fiable (ou zéro explicite) | oui | — |
   | `capped` | hard_limit atteint (choix) | oui | monter hard_limit |
-  | `incomplete` | 429/5xx persistant, page abandonnée | oui | relancer |
+  | `incomplete` | 429/5xx persistant, page abandonnée ou total inconnu | oui | relancer |
   | `error` | HTTP 4xx, exception réseau | oui | corriger requête |
 
-  **Le CSV est TOUJOURS écrit** (même en error/incomplete) — c'est le
-  manifest qui porte le statut réel. Un corpus `incomplete` ne passera
-  jamais pour `complete` en aval. Les skills downstream (screen, fulltext,
-  extract) doivent lire `search_status` avant de continuer.
+  Une réponse OpenAlex réussie avec `meta.count = 0` et aucune ligne est
+  `complete`, avec `reason = "zero_results"`.
+
+  **Le CSV est écrit après une exécution OpenAlex** (même en error/incomplete)
+  — c'est le manifest qui porte le statut réel. Une requête invalide, notamment
+  une chaîne OpenAlex, est refusée avant réseau et aucune sortie n'est écrite.
+  Un corpus `incomplete` ne passera jamais pour `complete` en aval. Les skills
+  downstream (screen, fulltext, extract) doivent lire `search_status` avant de
+  continuer.
 
   **`last_error_code` — piège Python.** La variable d'exception `e` est
   effacée à la sortie du bloc `except` en Python 3. Stocker `e.code` dans
@@ -182,18 +195,22 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
   `last_error_code = None` avant la boucle retry. Ne jamais référencer `e`
   hors du except.
 
-- **Signature des fonctions de search.** Les trois fonctions
-  (`_openalex_search`, `mcp_search`, `mock_search`) retournent
-  `tuple[list[dict], int, str, str]` = `(results, expected_count, status, reason)`.
-  `main()` déballe ce tuple. Si tu ajoutes une nouvelle source (crossref,
-  pubmed), sa fonction DOIT respecter cette signature. `mock_search`
-  retourne `(results, len(results), "complete", "mock")`.
-
-- **Comparaison broad ↔ narrow : comparer les ENSEMBLES de DOI, pas les
-  comptes agrégés.** Si les deux recherches plafonnent au même niveau
-  (ex. 50), le delta réel est invisible. La mesure correcte est :
-  `set(DOIs broad) - set(DOIs narrow)`, pas `len(broad) - len(narrow)`.
-  Vérifier aussi que `narrow ⊆ broad` (sinon bug).
+- **Contrat et registre des connecteurs.** `SearchResult` est l'alias de
+  `tuple[list[dict], int | None, SearchStatus, str]` et représente toujours
+  `(results, expected_count, status, reason)`. `SearchStatus` vaut
+  `complete`, `incomplete`, `capped` ou `error`. Le registre
+  `CONNECTOR_REGISTRY` ne contient pour l'instant que `openalex`, avec sa
+  fonction de recherche, l'endpoint `https://api.openalex.org/works`,
+  `api_version = "unversioned"` et `query_mode = "search"`.
+  `search_source(source, query)` interroge une seule source et valide ce
+  contrat ; `mcp_search` reste son alias rétrocompatible. La validation
+  exige une liste `results`, un `expected_count` entier supérieur ou égal à
+  zéro ou `None` si le total est inconnu, un statut autorisé et une chaîne
+  `reason`. Un contrat invalide est enregistré par `main()` comme une
+  erreur. `mock_search` retourne
+  `(results, len(results), "complete", "mock")`. La priorité globale traite
+  tout statut inconnu de manière défensive comme une erreur, jamais comme
+  `complete`.
 
 - **Shell escaping du JSON.** Les caractères `&`, `$`, `!`, `\"` dans les
   valeurs du JSON cassent l'appel shell direct (`python3 search.py '<json>'`).
@@ -237,10 +254,19 @@ title,doi,year,abstract,oa_url,pdf_status,source,query,date
   ```json
   {
     "stage": "search_done",
-    "queries": {"openalex": "..."},
+    "queries": {
+      "openalex": {
+        "query_mode": "search",
+        "search": "climate adaptation",
+        "filter": "from_publication_date:2020-01-01"
+      }
+    },
     "search_status": "complete|incomplete|capped|error",
     "search_meta": {
       "openalex": {
+        "endpoint": "https://api.openalex.org/works",
+        "api_version": "unversioned",
+        "query_mode": "search",
         "retrieved": 588,
         "expected": 588,
         "status": "complete",
@@ -250,6 +276,9 @@ title,doi,year,abstract,oa_url,pdf_status,source,query,date
     "updated": "2026-06-30T..."
   }
   ```
+
+  Quand la source ne fournit pas de total fiable, `expected` vaut `null` et
+  le statut doit rendre cette incertitude explicite (`incomplete`).
 
 # Critère de fin (Definition of Done)
 

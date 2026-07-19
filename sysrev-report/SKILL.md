@@ -34,6 +34,8 @@ Zotero/Mendeley. Le rapport est structuré pour être quasi publiable
 - `extraction.csv` existe avec des données
 - `prisma.json` a tous les compteurs remplis
 - `protocol.md` existe
+- le codebook d'extraction est présent et non vide
+- le nombre de cellules dans `extraction.csv` correspond à textes récupérés × variables
 
 # Procédure
 
@@ -58,6 +60,9 @@ Zotero/Mendeley. Le rapport est structuré pour être quasi publiable
    - Génère `export.ris` : export bibliographique
    - Met à jour `manifest.json`
 
+   Si le codebook manque ou si le nombre de cellules est incohérent, le rapport
+   est refusé avant toute synthèse LLM et ne passe jamais à `report_done`.
+
 3. Présente le rapport à l'utilisateur.
 
 # Règles
@@ -68,6 +73,12 @@ Zotero/Mendeley. Le rapport est structuré pour être quasi publiable
   leurs versions, et le rôle de l'IA vs l'humain (PRISMA-trAIce).
 - **Pas d'invention.** Les résultats sont issus de `extraction.csv`.
   Ne pas ajouter de conclusion non étayée par les données.
+- **Compteurs distincts.** Le rapport sépare les articles des cellules : textes
+  récupérés, articles soumis, articles avec/sans donnée exploitable, cellules
+  tentées, valeurs exploitables, `NON TROUVÉ`, erreurs API et citations rejetées.
+- **Contexte LLM.** Le prompt utilise `documents` pour les articles et `cells`
+  pour les variables ; un nombre de cellules ne doit jamais être présenté comme
+  un nombre d'articles.
 - **Symlink vault.** `/reviews` est un symlink vers le vault Obsidian.
   Les livrables sont automatiquement dans le vault. Ne pas copier
   manuellement — le script signale juste `(via symlink)`.
