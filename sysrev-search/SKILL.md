@@ -12,7 +12,7 @@ outputs:
   - /reviews/<id>/candidates.csv (avec provenance : source, requête, date)
   - mise à jour de prisma.json ("identified") et manifest.json
 requires:
-  env: [OPENALEX_API_KEY, UNPAYWALL_EMAIL]
+  env: [OPENALEX_API_KEY, UNPAYWALL_EMAIL, NCBI_EMAIL]
   tools: [clarify, terminal]
   scripts: [scripts/search.py]
 ---
@@ -21,7 +21,8 @@ requires:
 
 Interroger les bases scientifiques gratuites pour trouver des articles
 correspondant à la question de recherche, réconcilier avec les PDF déposés
-dans la dropzone, et produire un fichier `candidates.csv` traçable.
+dans la dropzone, et produire un fichier `candidates.csv` traçable. Les
+connecteurs disponibles sont OpenAlex et PubMed.
 
 # Pré-conditions
 
@@ -29,6 +30,8 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
 - `protocol.md` existe avec une question et des critères
 - `OPENALEX_API_KEY` est configurée ; une recherche réelle échoue explicitement
   si la clé est absente ou refusée
+- `NCBI_EMAIL` est configurée pour toute recherche PubMed réelle ;
+  `NCBI_API_KEY` est facultative
 
 # Procédure
 
@@ -50,6 +53,14 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
      https://developers.openalex.org/guides/searching
    - Consulter la référence officielle Works pour les champs et filtres :
      https://developers.openalex.org/api-reference/works
+   - Pour PubMed, le script exige exactement :
+     `{"query_mode":"pubmed","term":"(expression PubMed complète)"}`.
+     `term` est transmis tel quel à ESearch ; les chaînes simples, les champs
+     supplémentaires et les objets invalides sont refusés avant tout réseau et
+     toute écriture.
+   - PubMed utilise uniquement ESearch en POST (`usehistory=y`,
+     `sort=relevance`) puis EFetch XML par lots de 200 maximum :
+     https://www.ncbi.nlm.nih.gov/books/NBK25499/
 
 3. **Fais valider les requêtes par l'utilisateur via `clarify`.** Montre
    chaque requête formatée et demande confirmation. Tant que l'utilisateur
@@ -68,12 +79,15 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
    {
      "id": "adaptation-pme-2026",
       "queries": {
-        "openalex": {
-          "query_mode": "search",
-          "search": "SME climate adaptation",
-          "filter": "from_publication_date:2015-01-01"
-        },
-        "crossref": "SME climate adaptation France"
+         "openalex": {
+           "query_mode": "search",
+           "search": "SME climate adaptation",
+           "filter": "from_publication_date:2015-01-01"
+         },
+         "pubmed": {
+           "query_mode": "pubmed",
+           "term": "(SME climate adaptation[Title/Abstract])"
+         }
       }
    }
    ```
@@ -97,6 +111,11 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
 - **Pas de reformulation automatique.** Une fois les requêtes validées par
   l'humain, ne les change pas. Si une source ne retourne rien, le signaler
   sans inventer.
+- **PubMed — secrets et provenance.** `NCBI_EMAIL` et `NCBI_API_KEY` servent
+  uniquement aux appels E-utilities et ne doivent apparaître ni dans
+  `candidates.csv`, ni dans `manifest.json`, ni dans les logs. L'identité
+  Hermes d'un article est `https://pubmed.ncbi.nlm.nih.gov/{PMID}/` ; un
+  PMCID renseigne `oa_url` avec l'URL PMC correspondante.
 - **Sci-Hub désactivé.** Ne pas utiliser ni proposer Sci-Hub.
 - **Épinglage de version.** Noter l'endpoint et la version de chaque API
   source utilisée dans `manifest.json`.
@@ -120,6 +139,12 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
   `query_mode = "search"` et un champ `search` non vide. Le champ `filter`
   est facultatif et conserve les filtres structurés, séparés par des virgules.
   Toute chaîne OpenAlex est refusée avant tout appel réseau et toute écriture.
+
+- **PubMed — ESearch POST puis EFetch XML.** Fournir un objet avec
+  `query_mode = "pubmed"` et un `term` non vide. Le terme est conservé
+  exactement, `usehistory=y` et `sort=relevance` sont explicites, et chaque
+  EFetch demande au plus 200 notices. Sans `NCBI_API_KEY`, les appels sont
+  espacés pour rester à au plus 3 requêtes par seconde.
 
 - **Tester la requête avant le script.** En cas de doute, lancer un appel
   API direct (curl ou Python one-liner) pour vérifier le compte de résultats
@@ -166,8 +191,9 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
   et continuer → ça produirait un corpus partiel présenté comme complet.
 
 - **Détection d'incomplétude — 4 statuts distincts dans le manifest.**
-  `_openalex_search()` retourne `(results, expected_count, status, status_reason)`;
-  `expected_count` vaut `None` si le total OpenAlex n'est pas fiable.
+   `_openalex_search()` et `_pubmed_search()` retournent
+   `(results, expected_count, status, status_reason)` ; `expected_count` vaut
+   `None` si le total de la source n'est pas fiable.
   avec `status` ∈ {"complete", "incomplete", "capped", "error"}. Le statut
   global dans `manifest.json` est le pire des statuts par source
   (priorité error < incomplete < capped < complete).
@@ -179,12 +205,13 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
   | `incomplete` | 429/5xx persistant, page abandonnée ou total inconnu | oui | relancer |
   | `error` | HTTP 4xx, exception réseau | oui | corriger requête |
 
-  Une réponse OpenAlex réussie avec `meta.count = 0` et aucune ligne est
-  `complete`, avec `reason = "zero_results"`.
+   Une réponse OpenAlex avec `meta.count = 0`, ou une réponse PubMed avec
+   `Count = 0`, est `complete`, avec `reason = "zero_results"`.
 
-  **Le CSV est écrit après une exécution OpenAlex** (même en error/incomplete)
-  — c'est le manifest qui porte le statut réel. Une requête invalide, notamment
-  une chaîne OpenAlex, est refusée avant réseau et aucune sortie n'est écrite.
+   **Le CSV est écrit après une exécution de recherche** (même en
+   `error`/`incomplete`) — c'est le manifest qui porte le statut réel. Une
+   requête invalide, notamment une chaîne OpenAlex ou PubMed, est refusée avant
+   réseau et aucune sortie n'est écrite.
   Un corpus `incomplete` ne passera jamais pour `complete` en aval. Les skills
   downstream (screen, fulltext, extract) doivent lire `search_status` avant de
   continuer.
@@ -199,9 +226,11 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
   `tuple[list[dict], int | None, SearchStatus, str]` et représente toujours
   `(results, expected_count, status, reason)`. `SearchStatus` vaut
   `complete`, `incomplete`, `capped` ou `error`. Le registre
-  `CONNECTOR_REGISTRY` ne contient pour l'instant que `openalex`, avec sa
-  fonction de recherche, l'endpoint `https://api.openalex.org/works`,
-  `api_version = "unversioned"` et `query_mode = "search"`.
+  `CONNECTOR_REGISTRY` contient `openalex` et `pubmed`. PubMed utilise
+  `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi` comme endpoint
+  déclaré, `fetch_endpoint` vaut
+  `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi`,
+  `api_version = "NCBI E-utilities"` et `query_mode = "pubmed"`.
   `search_source(source, query)` interroge une seule source et valide ce
   contrat ; `mcp_search` reste son alias rétrocompatible. La validation
   exige une liste `results`, un `expected_count` entier supérieur ou égal à
@@ -239,7 +268,7 @@ dans la dropzone, et produire un fichier `candidates.csv` traçable.
 
 `candidates.csv` — colonnes attendues :
 ```
-title,doi,year,abstract,oa_url,pdf_status,source,query,date
+title,doi,source_id,year,abstract,oa_url,pdf_status,source,query,date
 ```
 
 - `pdf_status` : `oa` (open access dispo), `dropzone` (PDF fourni par l'utilisateur), `none`
@@ -263,15 +292,25 @@ title,doi,year,abstract,oa_url,pdf_status,source,query,date
     },
     "search_status": "complete|incomplete|capped|error",
     "search_meta": {
-      "openalex": {
-        "endpoint": "https://api.openalex.org/works",
-        "api_version": "unversioned",
-        "query_mode": "search",
-        "retrieved": 588,
-        "expected": 588,
-        "status": "complete",
-        "reason": ""
-      }
+       "openalex": {
+         "endpoint": "https://api.openalex.org/works",
+         "api_version": "unversioned",
+         "query_mode": "search",
+         "retrieved": 588,
+         "expected": 588,
+         "status": "complete",
+         "reason": ""
+       },
+       "pubmed": {
+         "endpoint": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+         "fetch_endpoint": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+         "api_version": "NCBI E-utilities",
+         "query_mode": "pubmed",
+         "retrieved": 588,
+         "expected": 588,
+         "status": "complete",
+         "reason": ""
+       }
     },
     "updated": "2026-06-30T..."
   }

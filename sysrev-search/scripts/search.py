@@ -7,15 +7,21 @@ fusionne les résultats, réconcilie avec la dropzone par DOI, et écrit
 candidates.csv avec provenance complète.
 
 Usage:
-  python3 search.py '<json>'            # mode réel (OpenAlex câblé)
+  python3 search.py '<json>'            # mode réel (OpenAlex + PubMed câblés)
   python3 search.py '<json>' --mock     # mode test avec données fictives
 
 JSON attendu:
-  {"id": "ma-revue", "queries": {"openalex": {
-      "query_mode": "search",
-      "search": "climate adaptation",
-      "filter": "from_publication_date:2020-01-01"
-  }, "crossref": "..."}}
+  {"id": "ma-revue", "queries": {
+      "openalex": {
+          "query_mode": "search",
+          "search": "climate adaptation",
+          "filter": "from_publication_date:2020-01-01"
+      },
+      "pubmed": {
+          "query_mode": "pubmed",
+          "term": "(climate adaptation[Title/Abstract])"
+      }
+  }}
 
   Le format OpenAlex est un objet avec `query_mode: "search"`, `search`
   et un `filter` facultatif ; il produit des paramètres `search=` et
@@ -29,7 +35,8 @@ Sources câblées :
     depuis février 2026 — lue depuis OPENALEX_API_KEY dans l'environnement.
     Authentification, quotas et coûts :
     https://developers.openalex.org/api-reference/authentication
-  - autres sources : via connecteurs API directs, ajoutés et validés une par une
+  - pubmed : ESearch + EFetch XML via les E-utilities NCBI, avec NCBI_EMAIL
+    obligatoire et NCBI_API_KEY facultative
 
 Le script ne prend AUCUNE décision de recherche : les requêtes sont déjà
 validées par l'humain en amont. Il fait l'exécution mécanique.
@@ -64,6 +71,19 @@ class PreparedOpenAlexQuery(TypedDict):
     params: dict[str, str]
 
 
+class PubMedSearchQuery(TypedDict):
+    query_mode: Literal["pubmed"]
+    term: str
+
+
+PubMedQueryInput: TypeAlias = PubMedSearchQuery
+
+
+class PreparedPubMedQuery(TypedDict):
+    query_mode: Literal["pubmed"]
+    params: dict[str, str]
+
+
 VALID_SEARCH_STATUSES = frozenset({"complete", "incomplete", "capped", "error"})
 
 
@@ -72,6 +92,7 @@ class ConnectorSpec(TypedDict):
     endpoint: str
     api_version: str
     query_mode: str
+    fetch_endpoint: NotRequired[str]
 
 
 class InvalidSearchContract(ValueError):
@@ -82,7 +103,19 @@ class InvalidOpenAlexQuery(ValueError):
     """Raised when an OpenAlex query is not in a supported input format."""
 
 
+class InvalidPubMedQuery(ValueError):
+    """Raised when a PubMed query is not in the supported input format."""
+
+
 _OPENALEX_QUERY_KEYS = frozenset({"query_mode", "search", "filter"})
+_PUBMED_QUERY_KEYS = frozenset({"query_mode", "term"})
+
+PUBMED_ESEARCH_ENDPOINT = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+PUBMED_EFETCH_ENDPOINT = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+NCBI_TOOL = "hermes_synthesis"
+PUBMED_BATCH_SIZE = 200
+NCBI_MAX_RETRIES = 4
+NCBI_RETRYABLE_HTTP_CODES = frozenset({429, 500, 502, 503, 504})
 
 
 def validate_openalex_query(query: object) -> OpenAlexQueryInput:
@@ -140,9 +173,63 @@ def prepare_openalex_query(query: object) -> PreparedOpenAlexQuery:
     return {"query_mode": "search", "params": params}
 
 
+def validate_pubmed_query(query: object) -> PubMedQueryInput:
+    """Validate the only supported PubMed input contract."""
+    prefix = "Requête PubMed invalide"
+    if isinstance(query, str):
+        raise InvalidPubMedQuery(
+            f"{prefix} : une chaîne simple est refusée ; un objet avec "
+            "query_mode='pubmed' et term= est requis"
+        )
+    if not isinstance(query, dict):
+        raise InvalidPubMedQuery(
+            f"{prefix} : un objet JSON avec query_mode='pubmed' et term est requis"
+        )
+
+    unexpected = set(query) - _PUBMED_QUERY_KEYS
+    if unexpected:
+        raise InvalidPubMedQuery(
+            f"{prefix} : champs supplémentaires interdits : {sorted(unexpected, key=str)}"
+        )
+
+    if "query_mode" not in query:
+        raise InvalidPubMedQuery(f"{prefix} : query_mode est obligatoire")
+    if query.get("query_mode") != "pubmed":
+        raise InvalidPubMedQuery(
+            f"{prefix} : query_mode doit être exactement 'pubmed'"
+        )
+
+    if "term" not in query:
+        raise InvalidPubMedQuery(f"{prefix} : term est obligatoire")
+    term_value = query.get("term")
+    if not isinstance(term_value, str):
+        raise InvalidPubMedQuery(f"{prefix} : term doit être une chaîne")
+    if not term_value.strip():
+        raise InvalidPubMedQuery(f"{prefix} : term ne peut pas être vide")
+
+    return query
+
+
+def prepare_pubmed_query(query: object) -> PreparedPubMedQuery:
+    """Return the exact PubMed term without rewriting its syntax."""
+    validated = validate_pubmed_query(query)
+    return {"query_mode": "pubmed", "params": {"term": validated["term"]}}
+
+
 def serialize_query_for_csv(query: OpenAlexQueryInput) -> str:
     """Serialize a validated structured query for candidates.csv provenance."""
     validated = validate_openalex_query(query)
+    return json.dumps(
+        validated,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def serialize_pubmed_query_for_csv(query: PubMedQueryInput) -> str:
+    """Serialize a validated PubMed query while preserving its exact term."""
+    validated = validate_pubmed_query(query)
     return json.dumps(
         validated,
         ensure_ascii=False,
@@ -155,6 +242,8 @@ def serialize_source_query_for_csv(source: str, query: SourceQueryInput) -> str:
     """Serialize provenance without coupling non-OpenAlex sources to OpenAlex."""
     if source == "openalex":
         return serialize_query_for_csv(query)
+    if source == "pubmed":
+        return serialize_pubmed_query_for_csv(query)
     if isinstance(query, str):
         return query
     if isinstance(query, dict):
@@ -227,6 +316,405 @@ def _clean_doi(doi_url: str) -> str:
     if not doi_url:
         return ""
     return doi_url.replace("https://doi.org/", "")
+
+
+def _resolve_hard_limit(max_results: int | None = None) -> int:
+    """Read the shared safety cap without allowing a malformed env to crash search."""
+    try:
+        hard_limit = int(os.environ.get("HARD_LIMIT", "2000"))
+    except (TypeError, ValueError):
+        hard_limit = 2000
+    hard_limit = max(0, hard_limit)
+    if max_results is not None:
+        hard_limit = min(hard_limit, max(0, max_results))
+    return hard_limit
+
+
+def _parse_nonnegative_count(value: object) -> int | None:
+    """Parse the string or integer count returned by NCBI, rejecting ambiguity."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str):
+        value = value.strip()
+        if value.isdigit():
+            return int(value)
+    return None
+
+
+def _xml_local_name(tag: object) -> str:
+    if not isinstance(tag, str):
+        return ""
+    return tag.rsplit("}", 1)[-1]
+
+
+def _xml_elements(root: object, name: str) -> list:
+    """Return XML descendants by local name, including namespace-qualified tags."""
+    if not hasattr(root, "iter"):
+        return []
+    return [node for node in root.iter() if _xml_local_name(node.tag) == name]
+
+
+def _xml_first_element(root: object, name: str):
+    elements = _xml_elements(root, name)
+    return elements[0] if elements else None
+
+
+def _xml_text(node: object) -> str:
+    """Flatten nested XML markup into normalized human-readable text."""
+    import re
+
+    if node is None or not hasattr(node, "itertext"):
+        return ""
+    return re.sub(r"\s+", " ", "".join(node.itertext())).strip()
+
+
+def _pubmed_year(article: object) -> str:
+    """Extract the best available publication year from a PubMed article."""
+    import re
+
+    for article_date in _xml_elements(article, "ArticleDate"):
+        year = _xml_text(_xml_first_element(article_date, "Year"))
+        if year:
+            return year
+
+    for pub_date in _xml_elements(article, "PubDate"):
+        year = _xml_text(_xml_first_element(pub_date, "Year"))
+        if year:
+            return year
+        medline_date = _xml_text(_xml_first_element(pub_date, "MedlineDate"))
+        match = re.search(r"\b(?:18|19|20|21)\d{2}\b", medline_date)
+        if match:
+            return match.group(0)
+
+    for pubmed_date in _xml_elements(article, "PubMedPubDate"):
+        if (pubmed_date.attrib.get("PubStatus", "").lower()
+                in {"epublish", "ppublish"}):
+            year = _xml_text(_xml_first_element(pubmed_date, "Year"))
+            if year:
+                return year
+
+    year = _xml_text(_xml_first_element(article, "Year"))
+    if year:
+        return year
+    return ""
+
+
+def _pubmed_article_to_result(article: object) -> dict | None:
+    """Map one PubMed XML notice to Hermes' common article shape."""
+    pmid = _xml_text(_xml_first_element(article, "PMID"))
+    if not pmid:
+        return None
+
+    title = _xml_text(_xml_first_element(article, "ArticleTitle"))
+    abstract_parts = [_xml_text(node) for node in _xml_elements(article, "AbstractText")]
+    abstract_parts = [part for part in abstract_parts if part]
+    if abstract_parts:
+        abstract = " ".join(abstract_parts)
+    else:
+        abstract = _xml_text(_xml_first_element(article, "Abstract"))
+
+    doi = ""
+    pmcid = ""
+    article_id_lists = _xml_elements(article, "ArticleIdList")
+    article_id_nodes = []
+    for article_id_list in article_id_lists:
+        article_id_nodes.extend(_xml_elements(article_id_list, "ArticleId"))
+    if not article_id_nodes:
+        article_id_nodes = _xml_elements(article, "ArticleId")
+    for article_id in article_id_nodes:
+        value = _xml_text(article_id)
+        id_type = article_id.attrib.get("IdType", "").lower()
+        if not value:
+            continue
+        if id_type == "doi" and not doi:
+            doi = value
+        elif id_type in {"pmc", "pmcid"} and not pmcid:
+            pmcid = value
+    if not doi:
+        for elocation in _xml_elements(article, "ELocationID"):
+            if elocation.attrib.get("EIdType", "").lower() == "doi":
+                doi = _xml_text(elocation)
+                if doi:
+                    break
+
+    for prefix in ("https://doi.org/", "http://doi.org/"):
+        if doi.startswith(prefix):
+            doi = doi[len(prefix):]
+            break
+    if pmcid and not pmcid.upper().startswith("PMC"):
+        pmcid = f"PMC{pmcid}"
+
+    return {
+        "title": title,
+        "doi": doi,
+        "source_id": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+        "year": _pubmed_year(article),
+        "abstract": abstract,
+        "oa_url": (
+            f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/" if pmcid else ""
+        ),
+    }
+
+
+def _parse_pubmed_efetch_xml(payload: bytes | str) -> list[dict]:
+    """Parse PubMed EFetch XML, including namespaced and mixed-content notices."""
+    import xml.etree.ElementTree as ET
+
+    if isinstance(payload, bytes):
+        root = ET.fromstring(payload)
+    else:
+        root = ET.fromstring(payload.encode("utf-8"))
+    results = []
+    for article in _xml_elements(root, "PubmedArticle"):
+        result = _pubmed_article_to_result(article)
+        if result is not None:
+            results.append(result)
+    return results
+
+
+def _parse_pubmed_esearch_response(payload: bytes | str) -> tuple[int | None, str, str]:
+    """Parse ESearch JSON or XML into ``(count, WebEnv, query_key)``."""
+    import json as json_module
+    import xml.etree.ElementTree as ET
+
+    if isinstance(payload, bytes):
+        text = payload.decode("utf-8-sig")
+    else:
+        text = payload
+    if text.lstrip().startswith("<"):
+        root = ET.fromstring(text.encode("utf-8"))
+        count_value = _xml_text(_xml_first_element(root, "Count"))
+        webenv = _xml_text(_xml_first_element(root, "WebEnv"))
+        query_key = _xml_text(_xml_first_element(root, "QueryKey"))
+    else:
+        parsed = json_module.loads(text)
+        esearch_result = parsed.get("esearchresult")
+        if not isinstance(esearch_result, dict):
+            raise ValueError("invalid ESearch response")
+        count_value = esearch_result.get("count")
+        if count_value is None:
+            count_value = esearch_result.get("Count")
+        webenv = esearch_result.get("webenv", esearch_result.get("WebEnv", ""))
+        query_key = esearch_result.get(
+            "querykey", esearch_result.get("QueryKey", esearch_result.get("query_key", ""))
+        )
+        if not isinstance(webenv, str):
+            webenv = ""
+        if not isinstance(query_key, str):
+            query_key = str(query_key) if query_key is not None else ""
+
+    return _parse_nonnegative_count(count_value), webenv, query_key
+
+
+def _sanitize_ncbi_message(message: object, email: str, api_key: str) -> str:
+    """Keep credentials out of error strings that can reach logs or manifests."""
+    import urllib.parse
+
+    safe_message = str(message)
+    for secret in (email, api_key):
+        if not secret:
+            continue
+        for candidate in (secret, urllib.parse.quote(secret, safe="")):
+            safe_message = safe_message.replace(candidate, "[redacted]")
+    return safe_message
+
+
+def _ncbi_rate_limit(api_key: str, rate_state: dict[str, float | None]) -> None:
+    """Keep unauthenticated E-utility traffic at or below three requests/second."""
+    if api_key:
+        return
+    import time
+
+    last_request_at = rate_state.get("last_request_at")
+    if last_request_at is not None:
+        remaining = (1 / 3) - (time.monotonic() - last_request_at)
+        if remaining > 0:
+            time.sleep(remaining)
+    rate_state["last_request_at"] = time.monotonic()
+
+
+def _ncbi_request(
+    endpoint: str,
+    params: dict[str, str],
+    *,
+    email: str,
+    api_key: str,
+    rate_state: dict[str, float | None],
+    method: str = "GET",
+) -> tuple[bytes | None, str, str]:
+    """Call one E-utility endpoint with the Hermes retry contract."""
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    if method.upper() == "POST":
+        request = urllib.request.Request(
+            endpoint,
+            data=urllib.parse.urlencode(params).encode("utf-8"),
+            method="POST",
+        )
+        request.add_header("Content-Type", "application/x-www-form-urlencoded")
+    else:
+        request_url = f"{endpoint}?{urllib.parse.urlencode(params)}"
+        request = urllib.request.Request(request_url, method="GET")
+    request.add_header("User-Agent", "HermesSynthesis/0.1")
+    last_error_code = None
+
+    for attempt in range(NCBI_MAX_RETRIES):
+        # Retries already wait at least one second; rate-limit the first attempt
+        # of each E-utility call without adding a second delay to retries.
+        if attempt == 0:
+            _ncbi_rate_limit(api_key, rate_state)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read(), "ok", ""
+        except urllib.error.HTTPError as exc:
+            last_error_code = exc.code
+            if exc.code not in NCBI_RETRYABLE_HTTP_CODES:
+                return None, "error", f"HTTP {exc.code}"
+            if attempt < NCBI_MAX_RETRIES - 1:
+                delay = 2 ** attempt
+                print(
+                    f"  ⚠️  PubMed HTTP {exc.code} — tentative "
+                    f"{attempt + 1}/{NCBI_MAX_RETRIES}, retry dans {delay}s...",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+            else:
+                print(
+                    f"  ⚠️  PubMed HTTP {exc.code} — tentative "
+                    f"{attempt + 1}/{NCBI_MAX_RETRIES} (dernier essai).",
+                    file=sys.stderr,
+                )
+        except Exception as exc:
+            safe_message = _sanitize_ncbi_message(exc, email, api_key)
+            return None, "error", f"exception: {safe_message}"
+
+    code = str(last_error_code) if last_error_code is not None else "429/5xx"
+    return (
+        None,
+        "incomplete",
+        f"requête abandonnée après {NCBI_MAX_RETRIES} tentatives (HTTP {code})",
+    )
+
+
+def _pubmed_search(query: SourceQueryInput, max_results: int | None = None) -> SearchResult:
+    """Search PubMed through ESearch history and fetch XML notices in batches."""
+    try:
+        prepared_query = prepare_pubmed_query(query)
+    except InvalidPubMedQuery as exc:
+        print(f"  ❌ {exc}", file=sys.stderr)
+        return [], None, "error", str(exc)
+
+    email = os.environ.get("NCBI_EMAIL", "").strip()
+    if not email:
+        reason = "NCBI_EMAIL est obligatoire pour une requête PubMed réelle"
+        print(f"  ❌ {reason}", file=sys.stderr)
+        return [], None, "error", reason
+    api_key = os.environ.get("NCBI_API_KEY", "").strip()
+    hard_limit = _resolve_hard_limit(max_results)
+    rate_state: dict[str, float | None] = {"last_request_at": None}
+
+    esearch_params = {
+        "db": "pubmed",
+        "term": prepared_query["params"]["term"],
+        "retmax": "0",
+        "usehistory": "y",
+        "sort": "relevance",
+        "retmode": "json",
+        "tool": NCBI_TOOL,
+        "email": email,
+    }
+    if api_key:
+        esearch_params["api_key"] = api_key
+
+    esearch_payload, http_status, http_reason = _ncbi_request(
+        PUBMED_ESEARCH_ENDPOINT,
+        esearch_params,
+        email=email,
+        api_key=api_key,
+        rate_state=rate_state,
+        method="POST",
+    )
+    if esearch_payload is None:
+        return [], None, "error", f"ESearch: {http_reason}"
+
+    try:
+        expected_count, webenv, query_key = _parse_pubmed_esearch_response(esearch_payload)
+    except Exception as exc:
+        reason = _sanitize_ncbi_message(exc, email, api_key)
+        print(f"  ❌ PubMed ESearch response invalide : {reason}", file=sys.stderr)
+        return [], None, "incomplete", "missing_or_invalid_expected_count"
+
+    if expected_count is None:
+        return [], None, "incomplete", "missing_or_invalid_expected_count"
+    if expected_count == 0:
+        return [], 0, "complete", "zero_results"
+    if not webenv or not query_key:
+        return [], expected_count, "incomplete", "missing_history_parameters"
+    if hard_limit == 0:
+        return [], expected_count, "capped", "plafond 0 atteint"
+
+    target_count = min(expected_count, hard_limit)
+    all_results: list[dict] = []
+    batch_number = 0
+    for retstart in range(0, target_count, PUBMED_BATCH_SIZE):
+        batch_number += 1
+        retmax = min(PUBMED_BATCH_SIZE, target_count - retstart)
+        efetch_params = {
+            "db": "pubmed",
+            "query_key": query_key,
+            "WebEnv": webenv,
+            "retstart": str(retstart),
+            "retmax": str(retmax),
+            "retmode": "xml",
+            "tool": NCBI_TOOL,
+            "email": email,
+        }
+        if api_key:
+            efetch_params["api_key"] = api_key
+
+        efetch_payload, http_status, http_reason = _ncbi_request(
+            PUBMED_EFETCH_ENDPOINT,
+            efetch_params,
+            email=email,
+            api_key=api_key,
+            rate_state=rate_state,
+        )
+        if efetch_payload is None:
+            return all_results, expected_count, "incomplete", f"EFetch: {http_reason}"
+
+        try:
+            batch_results = _parse_pubmed_efetch_xml(efetch_payload)
+        except Exception as exc:
+            reason = _sanitize_ncbi_message(exc, email, api_key)
+            print(
+                f"  ❌ PubMed EFetch XML invalide sur le lot {batch_number} : {reason}",
+                file=sys.stderr,
+            )
+            return all_results, expected_count, "incomplete", (
+                f"invalid_efetch_xml_batch_{batch_number}"
+            )
+
+        if not batch_results:
+            return all_results, expected_count, "incomplete", (
+                f"lot {batch_number} sans notice PubMed valide"
+            )
+        all_results.extend(batch_results)
+
+    retrieved = len(all_results)
+    if retrieved < target_count:
+        return all_results[:hard_limit], expected_count, "incomplete", (
+            f"récupéré {retrieved}/{expected_count}"
+        )
+    if expected_count > hard_limit:
+        return all_results[:hard_limit], expected_count, "capped", (
+            f"arrêt volontaire à {hard_limit} (requête trop large)"
+        )
+    return all_results[:hard_limit], expected_count, "complete", ""
 
 
 def _openalex_search(query: SourceQueryInput, max_results: int | None = None) -> SearchResult:
@@ -446,6 +934,13 @@ CONNECTOR_REGISTRY: dict[str, ConnectorSpec] = {
         "api_version": "unversioned",
         "query_mode": "search",
     },
+    "pubmed": {
+        "search": _pubmed_search,
+        "endpoint": PUBMED_ESEARCH_ENDPOINT,
+        "fetch_endpoint": PUBMED_EFETCH_ENDPOINT,
+        "api_version": "NCBI E-utilities",
+        "query_mode": "pubmed",
+    },
 }
 
 
@@ -454,7 +949,8 @@ def search_source(source: str, query: SourceQueryInput) -> SearchResult:
     spec = CONNECTOR_REGISTRY.get(source)
     if spec is None:
         raise NotImplementedError(
-            f"Source '{source}' pas encore câblée. Sources disponibles : openalex.\n"
+            f"Source '{source}' pas encore câblée. Sources disponibles : "
+            "openalex, pubmed.\n"
             f"Utilise --mock pour tester le pipeline en attendant."
         )
     result = spec["search"](query)
@@ -554,6 +1050,11 @@ def mock_search(source: str, query: SourceQueryInput) -> SearchResult:
             validate_openalex_query(query)
         except InvalidOpenAlexQuery as exc:
             return [], None, "error", str(exc)
+    elif source == "pubmed":
+        try:
+            validate_pubmed_query(query)
+        except InvalidPubMedQuery as exc:
+            return [], None, "error", str(exc)
     results = MOCK_DATA.get(source, [])
     return _validate_search_result(source, (results, len(results), "complete", "mock"))
 
@@ -614,6 +1115,8 @@ def _connector_metadata(source: str, query_mode: str | None = None) -> dict[str,
         "api_version": spec["api_version"],
         "query_mode": query_mode if query_mode is not None else spec["query_mode"],
     }
+    if "fetch_endpoint" in spec:
+        metadata["fetch_endpoint"] = spec["fetch_endpoint"]
     return metadata
 
 
@@ -645,14 +1148,19 @@ def main(rid: str, queries: dict[str, SourceQueryInput], use_mock: bool = False)
         print("   Lance d'abord la skill protocol.", file=sys.stderr)
         sys.exit(1)
 
-    # Refuse les anciennes chaînes OpenAlex avant tout appel de connecteur ou
-    # écriture de sortie. Les futurs connecteurs gardent leur entrée générique;
-    # les objets OpenAlex invalides suivent le chemin d'erreur du connecteur.
+    # Refuse les requêtes structurées invalides avant tout appel de connecteur
+    # ou écriture de sortie. PubMed ne conserve aucun chemin d'entrée générique.
     for source, query in queries.items():
         if source == "openalex" and isinstance(query, str):
             try:
                 validate_openalex_query(query)
             except InvalidOpenAlexQuery as exc:
+                print(f"❌ {exc}", file=sys.stderr)
+                raise
+        elif source == "pubmed":
+            try:
+                validate_pubmed_query(query)
+            except InvalidPubMedQuery as exc:
                 print(f"❌ {exc}", file=sys.stderr)
                 raise
 
@@ -666,7 +1174,14 @@ def main(rid: str, queries: dict[str, SourceQueryInput], use_mock: bool = False)
 
     for source, query in queries.items():
         query_mode = _query_mode_for_manifest(source, query)
-        print(f"🔍 Recherche {source} : {query}")
+        display_query = query
+        if source == "pubmed":
+            display_query = _sanitize_ncbi_message(
+                query,
+                os.environ.get("NCBI_EMAIL", ""),
+                os.environ.get("NCBI_API_KEY", ""),
+            )
+        print(f"🔍 Recherche {source} : {display_query}")
         try:
             raw_result = search_fn(source, query)
             results, expected, status, reason = _validate_search_result(source, raw_result)

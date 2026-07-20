@@ -218,7 +218,7 @@ class SearchTests(unittest.TestCase):
     def test_non_openalex_string_provenance_is_exact(self):
         query = "term[Title/Abstract] AND 2020:2024"
         self.assertEqual(
-            search.serialize_source_query_for_csv("pubmed", query),
+            search.serialize_source_query_for_csv("crossref", query),
             query,
         )
 
@@ -228,20 +228,20 @@ class SearchTests(unittest.TestCase):
             "term": "climate AND adaptation",
         }
         self.assertEqual(
-            search.serialize_source_query_for_csv("pubmed", query),
+            search.serialize_source_query_for_csv("crossref", query),
             '{"filters":{"date":"2020-01-01"},"term":"climate AND adaptation"}',
         )
 
     def test_non_openalex_provenance_does_not_validate_openalex(self):
         query = {"term": "climate", "field": "title"}
         with patch.object(search, "validate_openalex_query") as validate:
-            result = search.serialize_source_query_for_csv("pubmed", query)
+            result = search.serialize_source_query_for_csv("crossref", query)
         self.assertEqual(result, '{"field":"title","term":"climate"}')
         validate.assert_not_called()
 
     def test_source_provenance_rejects_unsupported_type(self):
         with self.assertRaises(TypeError):
-            search.serialize_source_query_for_csv("pubmed", 42)
+            search.serialize_source_query_for_csv("crossref", 42)
 
     def test_main_uses_generic_provenance_for_non_openalex_source(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -261,11 +261,11 @@ class SearchTests(unittest.TestCase):
                 return_value=([work(1)], 1, "complete", "fixture"),
             ), patch("urllib.request.urlopen") as urlopen:
                 with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                    search.main(rid, {"pubmed": query}, use_mock=False)
+                    search.main(rid, {"crossref": query}, use_mock=False)
 
             with (review_dir / "candidates.csv").open(newline="", encoding="utf-8") as handle:
                 rows = list(csv.DictReader(handle))
-            self.assertEqual(rows[0]["source"], "pubmed")
+            self.assertEqual(rows[0]["source"], "crossref")
             self.assertEqual(rows[0]["query"], '{"filters":{"year":2020},"term":"climate"}')
             urlopen.assert_not_called()
 
