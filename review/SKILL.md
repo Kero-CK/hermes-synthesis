@@ -50,16 +50,29 @@ pour les validations humaines (protocole, requêtes, cas ambigus).
 3. Recueillir les **critères inclusion/exclusion**.
 4. Recueillir le **type de revue** (scoping/systematic).
 5. Recueillir le **codebook** d'extraction.
-6. Exécuter la skill `sysrev-protocol`.
+6. Avant d'exécuter `sysrev-protocol`, recueillir le choix des sources et la
+   justification de chaque source. Pour chaque source sélectionnée, proposer
+   une requête adaptée, la présenter séparément et obtenir sa validation
+   humaine explicite. Conserver une question par appel `clarify`, puis
+   demander une confirmation explicite du plan final avant d'exécuter la skill
+   `sysrev-protocol`.
 
 ## Phase 2 — Recherche
-7. Proposer une **requête par source** basée sur la question.
-8. Faire valider chaque requête par l'utilisateur.
-9. Exécuter la skill `sysrev-search` en mode réel (pas de mock).
-9a. Relire `/reviews/<id>/manifest.json` et vérifier que
-    `search_status` vaut exactement `"complete"`. Si le champ est absent,
-    inconnu, `incomplete`, `capped` ou `error`, arrêter le pipeline avant
-    `sysrev-dedup` et `sysrev-screen`. Pour `capped`, corriger la recherche
+7. Relire `/reviews/<id>/manifest.json` après le protocole et charger
+   `sources`, `source_reasons` et `queries`. Le protocole est l'autorité pour
+   le choix des sources et les requêtes validées.
+8. Présenter une dernière fois à l'utilisateur les sources, leurs
+   justifications et les requêtes exactes enregistrées dans `queries`.
+9. Transmettre `manifest.json → queries` tel quel à `sysrev-search` en mode
+   réel (pas de mock). Ne pas régénérer, reformuler, convertir ou compléter
+   silencieusement une requête après le protocole.
+9a. Si une source ou une requête doit changer, arrêter la recherche et revenir
+    à `sysrev-protocol` pour une nouvelle validation humaine avant toute
+    exécution. Relire ensuite le nouveau `manifest.json`.
+9b. Relire `/reviews/<id>/manifest.json` et vérifier que
+     `search_status` vaut exactement `"complete"`. Si le champ est absent,
+     inconnu, `incomplete`, `capped` ou `error`, arrêter le pipeline avant
+     `sysrev-dedup` et `sysrev-screen`. Pour `capped`, corriger la recherche
     ou augmenter `HARD_LIMIT` puis la relancer. Aucun `force` de screening ne
     permet de contourner cette barrière.
 

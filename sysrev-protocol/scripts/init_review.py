@@ -11,7 +11,7 @@ Usage:
   echo '<json>' | python3 init_review.py --stdin
 
 Exemple:
-  python3 init_review.py '{"id":"test-2026","question":"...","review_mode":"scoping","include":[...],"exclude":[...],"codebook":[...]}'
+  python3 init_review.py '{"id":"test-2026","question":"...","review_mode":"scoping","include":[...],"exclude":[...],"codebook":[...],"sources":[...]}'
 
 Aucune logique de jugement : pure mécanique de fichiers.
 """
@@ -22,15 +22,72 @@ import sys
 from datetime import datetime, timezone
 
 
-def main(payload: dict) -> str:
-    """Crée le dossier de revue et retourne le chemin base."""
-    rid = payload["id"]
+SUPPORTED_SOURCES = {
+    "openalex": "search",
+    "pubmed": "pubmed",
+}
 
-    # Validation minimale du slug
-    if not rid or " " in rid or "/" in rid:
+
+def _validate_sources(payload: dict) -> list[dict]:
+    """Validate the protocol-level source plan without parsing query syntax."""
+    sources = payload.get("sources")
+    if not isinstance(sources, list) or not sources:
+        raise ValueError("Le champ sources est obligatoire et doit contenir au moins une source")
+
+    validated = []
+    seen = set()
+    for index, entry in enumerate(sources):
+        if not isinstance(entry, dict):
+            raise ValueError(f"Source #{index + 1} invalide : un objet est requis")
+
+        source = entry.get("source")
+        if source not in SUPPORTED_SOURCES:
+            raise ValueError(f"Source inconnue : {source!r}")
+        if source in seen:
+            raise ValueError(f"Source présente deux fois : {source}")
+        seen.add(source)
+
+        reason = entry.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(f"Raison vide pour la source : {source}")
+
+        query = entry.get("query")
+        if not isinstance(query, dict):
+            raise ValueError(f"Requête absente ou non structurée pour : {source}")
+        expected_mode = SUPPORTED_SOURCES[source]
+        if query.get("query_mode") != expected_mode:
+            raise ValueError(
+                f"query_mode incompatible pour {source} : "
+                f"'{expected_mode}' est requis"
+            )
+
+        validated.append(entry)
+
+    return validated
+
+
+def _validate_payload(payload: object) -> list[dict]:
+    """Validate every field needed before creating any review file."""
+    if not isinstance(payload, dict):
+        raise ValueError("Le payload du protocole doit être un objet JSON")
+
+    rid = payload.get("id")
+    if not isinstance(rid, str) or not rid or " " in rid or "/" in rid or "\\" in rid:
         raise ValueError(f"Slug invalide : '{rid}'. Utilise des minuscules et des tirets.")
 
-    base = f"/reviews/{rid}"
+    return _validate_sources(payload)
+
+
+def main(payload: dict, reviews_root: str = "/reviews") -> str:
+    """Crée le dossier de revue et retourne le chemin base."""
+    source_plan = _validate_payload(payload)
+    rid = payload["id"]
+
+    base = (
+        f"/reviews/{rid}"
+        if reviews_root == "/reviews"
+        else os.path.join(reviews_root, rid)
+    )
 
     # Création de l'arborescence
     os.makedirs(f"{base}/sources", exist_ok=True)
@@ -67,6 +124,21 @@ def main(payload: dict) -> str:
     if not payload.get("codebook"):
         lines.append("*(aucune variable définie)*")
 
+    lines.extend(["", "## Plan de recherche multi-source", ""])
+    for entry in source_plan:
+        lines.extend([
+            f"### Source : `{entry['source']}`",
+            "",
+            f"**Justification :** {entry['reason']}",
+            "",
+            "**Requête exacte :**",
+            "",
+            "```json",
+            json.dumps(entry["query"], ensure_ascii=False, indent=2),
+            "```",
+            "",
+        ])
+
     lines.append("")
 
     with open(f"{base}/protocol.md", "w", encoding="utf-8") as f:
@@ -89,6 +161,11 @@ def main(payload: dict) -> str:
         "id": rid,
         "stage": "protocol_done",
         "review_mode": payload.get("review_mode", "scoping"),
+        "sources": [entry["source"] for entry in source_plan],
+        "queries": {entry["source"]: entry["query"] for entry in source_plan},
+        "source_reasons": {
+            entry["source"]: entry["reason"] for entry in source_plan
+        },
         "updated": datetime.now(timezone.utc).isoformat(),
     }
     with open(f"{base}/manifest.json", "w", encoding="utf-8") as f:

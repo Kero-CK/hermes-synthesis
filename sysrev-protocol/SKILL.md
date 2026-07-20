@@ -22,9 +22,9 @@ requires:
 # Objectif
 
 Créer le squelette d'une revue de littérature structurée. La skill recueille
-auprès du chercheur la question, les critères et le codebook, puis initialise
-le dossier de revue avec les fichiers d'état nécessaires au pipeline Hermes
-Synthesis.
+auprès du chercheur la question, les critères, le codebook et un plan de
+recherche multi-source, puis initialise le dossier de revue avec les fichiers
+d'état nécessaires au pipeline Hermes Synthesis.
 
 # Pré-conditions
 
@@ -64,14 +64,28 @@ valide pointant vers le vault.
    d. **Le type de revue** — `scoping` (défaut) ou `systematic`.
    e. **Le CODEBOOK d'extraction** — les variables à extraire de chaque
       article inclus. Chaque variable a un nom et une description courte.
+   f. **Le plan de recherche multi-source** — demande quelles sources utiliser
+      (`openalex`, `pubmed`, ou les deux) et explique leur utilité : OpenAlex
+      apporte une couverture multidisciplinaire générale ; PubMed apporte une
+      couverture biomédicale spécialisée. Ne recommande PubMed que si le
+      sujet concerne la santé, la médecine ou les sciences de la vie ; le
+      choix final appartient toujours au chercheur.
+      Pour chaque source choisie, propose une requête adaptée sans demander au
+      chercheur d'en connaître la syntaxe, puis présente les requêtes une par
+      une et obtiens sa validation explicite. Conserve chaque requête validée
+      exactement, sans conversion silencieuse.
 
    > Une question par appel à `clarify`. Ne pas tout demander d'un coup.
 
-   **Raccourci :** si l'utilisateur fournit d'emblée tous les champs
-   (slug, question, type, inclusion, exclusion, codebook), passer
-   directement à l'étape 3 sans passer par les `clarify` successifs.
+   **Raccourci :** il n'est utilisable que si l'utilisateur fournit d'emblée
+   tous les champs suivants : slug, question, type de revue, inclusions,
+   exclusions, codebook, sources sélectionnées, justification de chaque
+   source et requête structurée validée pour chaque source. Sans plan de
+   recherche multi-source complet, poursuivre les questions successives via
+   `clarify`.
 
-3. Une fois toutes les réponses collectées, exécute :
+3. Une fois toutes les réponses collectées et chaque source/requête validée
+   explicitement par l'utilisateur, exécute :
    ```
    python3 $HOME/.hermes/skills/sysrev-protocol/scripts/init_review.py '<json>'
    ```
@@ -81,17 +95,41 @@ valide pointant vers le vault.
    > absolu : `/home/agent/.hermes/skills/sysrev/sysrev-protocol/scripts/init_review.py`.
    avec le JSON structuré comme suit :
    ```json
-   {
-     "id": "adaptation-pme-2026",
-     "question": "Comment les PME françaises s'adaptent-elles au changement climatique ?",
-     "review_mode": "scoping",
-     "include": ["PME de moins de 250 salariés", "publié après 2015"],
-     "exclude": ["articles d'opinion"],
-     "codebook": [
-       {"name": "secteur", "description": "Secteur d'activité de la PME"},
-       {"name": "strategie", "description": "Type de stratégie d'adaptation"}
-     ]
-   }
+    {
+      "id": "microbiome-mici-2026",
+      "question": "Quels facteurs influencent la composition du microbiome intestinal chez les adultes atteints de maladie inflammatoire chronique de l'intestin ?",
+      "review_mode": "scoping",
+      "include": [
+        "adultes atteints de maladie inflammatoire chronique de l'intestin",
+        "études observationnelles ou interventionnelles",
+        "publié après 2015"
+      ],
+      "exclude": ["modèles animaux uniquement", "éditoriaux"],
+      "codebook": [
+        {"name": "maladie", "description": "Type de maladie inflammatoire"},
+        {"name": "composition_microbiome", "description": "Composition microbienne mesurée"},
+        {"name": "facteur_associe", "description": "Facteur associé à la composition"}
+      ],
+      "sources": [
+        {
+          "source": "openalex",
+          "reason": "Couverture multidisciplinaire générale",
+          "query": {
+            "query_mode": "search",
+            "search": "gut microbiome inflammatory bowel disease",
+            "filter": "from_publication_date:2015-01-01"
+          }
+        },
+        {
+          "source": "pubmed",
+          "reason": "Couverture biomédicale spécialisée",
+          "query": {
+            "query_mode": "pubmed",
+            "term": "(\"gut microbiome\"[Title/Abstract] AND \"inflammatory bowel disease\"[Title/Abstract])"
+          }
+        }
+      ]
+    }
    ```
 
    ### Pitfalls d'exécution
@@ -138,21 +176,29 @@ valide pointant vers le vault.
      Le chemin absolu fiable est :
      `/home/agent/.hermes/skills/sysrev/sysrev-protocol/scripts/init_review.py`
 
-4. Relis `protocol.md` à l'utilisateur et demande confirmation via `clarify`.
-   Corrige et redemande si nécessaire.
+4. Relis `protocol.md` à l'utilisateur pour contrôler la traçabilité du plan
+   multi-source. Si une source ou une requête doit changer, reviens à la
+   validation de l'étape 2 avant toute recherche ; ne réécris pas le plan
+   silencieusement après sa création.
 
 # Règles
 
 - **Ne JAMAIS inventer** un critère ou une variable. Si l'utilisateur est
   vague, redemander via `clarify`.
+- Au moins une source doit être sélectionnée. Les sources autorisées sont
+  `openalex` et `pubmed`, chacune une seule fois, avec une justification et
+  une requête structurée portant le `query_mode` correspondant.
 - Le codebook est un artefact méthodologique figé : pas de variable ajoutée
   en cours de route sans repasser par cette skill.
 - Les critères doivent être **testables** : pas de « articles intéressants ».
 - Le slug est **immuable** une fois la revue créée.
+- La recherche réelle n'est pas lancée par cette skill : elle est déclenchée
+  ensuite par `sysrev-search` avec `manifest.json → queries`.
 
 # Journalisation
 
-- `manifest.json` : `stage = "protocol_done"`, `review_mode` renseigné.
+- `manifest.json` : `stage = "protocol_done"`, `review_mode` renseigné,
+  `sources`, `queries` et `source_reasons` enregistrés.
 
 # Architecture
 
@@ -176,6 +222,8 @@ symlink une fois pour toutes.
 
 - `protocol.md` existe dans `/reviews/<id>/`
 - Question, critères inclusion/exclusion, codebook, type de revue présents
+- Plan multi-source présent avec au moins une source, justification et requête
+  exacte validée pour chaque source
 - L'utilisateur a confirmé
 - `prisma.json` existe avec compteurs à zéro
 - `manifest.json` indique `stage = "protocol_done"`
