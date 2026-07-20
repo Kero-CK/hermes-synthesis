@@ -245,8 +245,13 @@ def sanitize_document(text: str) -> str:
 
 
 def _call_llm_extract(prompt: str, user_message: str,
-                      max_tokens: int = 400) -> dict | None:
-    """Appelle l'API LLM pour l'extraction. Retourne le JSON parsé ou None."""
+                      max_tokens: int = 400) -> tuple[dict | None, str]:
+    """Appelle l'API LLM pour l'extraction.
+
+    Retourne (JSON parsé, modèle servi) — le modèle servi est le champ
+    response["model"] de l'API, qui peut différer de l'alias demandé
+    (cf. experiments/ERRATUM-MODEL-IDENTITY.md). (None, "") en erreur.
+    """
     import urllib.request
     import urllib.error
 
@@ -255,7 +260,7 @@ def _call_llm_extract(prompt: str, user_message: str,
     model = os.environ.get("LLM_EXTRACTION_MODEL", "deepseek-chat")
 
     if not endpoint or not api_key:
-        return None
+        return None, ""
 
     url = f"{endpoint.rstrip('/')}/chat/completions"
     body = json.dumps({
@@ -276,11 +281,12 @@ def _call_llm_extract(prompt: str, user_message: str,
         })
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read().decode())
+            served_model = str(data.get("model", "") or "")
             content = data["choices"][0]["message"]["content"]
-            return json.loads(content)
+            return json.loads(content), served_model
     except Exception as e:
         print(f"  ⚠️  LLM extract error: {e}", file=sys.stderr)
-        return None
+        return None, ""
 
 
 def llm_extract(fulltext: str, variable_name: str, variable_desc: str,
@@ -303,16 +309,18 @@ def llm_extract(fulltext: str, variable_name: str, variable_desc: str,
     )
     user_message = f"<DOCUMENT>\n{sanitize_document(fulltext)}\n</DOCUMENT>"
 
-    result = _call_llm_extract(prompt, user_message)
+    result, served_model = _call_llm_extract(prompt, user_message)
 
     if result and "valeur" in result:
         return {
             "valeur": result.get("valeur", "NON TROUVÉ"),
             "citation": result.get("citation", ""),
             "section": result.get("section", ""),
+            "model_served": served_model,
         }
 
-    return {"valeur": "ERREUR API", "citation": "", "section": ""}
+    return {"valeur": "ERREUR API", "citation": "", "section": "",
+            "model_served": served_model}
 
 
 # ---------------------------------------------------------------------------
@@ -369,8 +377,9 @@ def llm_extract_retry(fulltext: str, variable_name: str, variable_desc: str,
         variable_description=variable_desc,
     )
     user_message = f"<DOCUMENT>\n{sanitize_document(fulltext)}\n</DOCUMENT>"
-    result = _call_llm_extract(prompt, user_message, max_tokens=800)
+    result, served_model = _call_llm_extract(prompt, user_message, max_tokens=800)
     if result is not None and "valeur" in result and isinstance(result.get("candidates"), list):
+        result["model_served"] = served_model
         return result
     return None
 
@@ -464,7 +473,7 @@ def mock_extract(fulltext: str, variable_name: str, variable_desc: str,
 
 def log_decision(base: str, doi: str, variable: str, decision: str, reason: str,
                  run_id: str, *, identity_type: str = "doi", source_id: str = "",
-                 oa_url: str = "", actual_doi: str = ""):
+                 oa_url: str = "", actual_doi: str = "", model_served: str = ""):
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "run": run_id,
@@ -474,6 +483,10 @@ def log_decision(base: str, doi: str, variable: str, decision: str, reason: str,
         "decision": decision,
         "reason": reason,
     }
+    # Modèle réellement servi par l'API (cf. ERRATUM-MODEL-IDENTITY.md).
+    # Champ additif : absent en mock et dans les anciens journaux.
+    if model_served:
+        entry["model_served"] = model_served
     if identity_type != "doi":
         entry.update({
             "identity_type": identity_type,
@@ -626,6 +639,7 @@ def main(rid: str, use_mock: bool = False):
             valeur = result["valeur"]
             citation = result["citation"]
             section = result.get("section", "")
+            model_served = result.get("model_served", "")
 
             if valeur not in ("NON TROUVÉ", "ERREUR API") and not citation_is_verifiable(citation, fulltext):
                 # Retry ciblé : le LLM revoit le document avec la citation
@@ -636,6 +650,7 @@ def main(rid: str, use_mock: bool = False):
                 retry_result = retry_fn(fulltext, var["name"], var["description"], citation)
                 if retry_result is not None:
                     retry_attempts += 1
+                    retry_served = retry_result.get("model_served", "")
                     retry_valeur = str(retry_result.get("valeur", "") or "")
                     if is_exploitable_value(retry_valeur):
                         for candidate in retry_result.get("candidates", [])[:3]:
@@ -652,17 +667,18 @@ def main(rid: str, use_mock: bool = False):
                     if recovered is not None:
                         retry_recovered += 1
                         valeur, citation, section = recovered
+                        model_served = retry_served or model_served
                         log_decision(base, doc, var["name"], "citation_retry",
                                      "Retry copie exacte : citation vérifiable récupérée",
                                      run_id, identity_type=identity_type,
                                      source_id=source_id, oa_url=oa_url,
-                                     actual_doi=actual_doi)
+                                     actual_doi=actual_doi, model_served=retry_served)
                     else:
                         log_decision(base, doc, var["name"], "citation_retry",
                                      "Retry copie exacte : aucun candidat vérifiable",
                                      run_id, identity_type=identity_type,
                                      source_id=source_id, oa_url=oa_url,
-                                     actual_doi=actual_doi)
+                                     actual_doi=actual_doi, model_served=retry_served)
                 if recovered is None:
                     valeur = "CITATION REJETÉE"
                     citation = ""
@@ -688,27 +704,27 @@ def main(rid: str, use_mock: bool = False):
                 log_decision(base, doc, var["name"], "rejected_citation",
                              "Citation non vérifiable dans le texte source", run_id,
                              identity_type=identity_type, source_id=source_id,
-                             oa_url=oa_url, actual_doi=actual_doi)
+                             oa_url=oa_url, actual_doi=actual_doi, model_served=model_served)
                 print(f"  ❌ {doi_safe} / {var['name']} → CITATION REJETÉE")
             elif valeur == "ERREUR API":
                 api_errors += 1
                 log_decision(base, doc, var["name"], "api_error",
                              "Échec API LLM — variable non évaluée", run_id,
                              identity_type=identity_type, source_id=source_id,
-                             oa_url=oa_url, actual_doi=actual_doi)
+                             oa_url=oa_url, actual_doi=actual_doi, model_served=model_served)
                 print(f"  ❌ {doi_safe} / {var['name']} → ERREUR API")
             elif valeur == "NON TROUVÉ":
                 not_found += 1
                 log_decision(base, doc, var["name"], "not_found",
                              f"Variable '{var['name']}' non trouvée dans le texte", run_id,
                              identity_type=identity_type, source_id=source_id,
-                             oa_url=oa_url, actual_doi=actual_doi)
+                             oa_url=oa_url, actual_doi=actual_doi, model_served=model_served)
                 print(f"  ⚠️  {doi_safe} / {var['name']} → NON TROUVÉ")
             else:
                 log_decision(base, doc, var["name"], "extracted",
                              f"Extraction réussie ({len(citation)} caractères)", run_id,
                              identity_type=identity_type, source_id=source_id,
-                             oa_url=oa_url, actual_doi=actual_doi)
+                             oa_url=oa_url, actual_doi=actual_doi, model_served=model_served)
                 print(f"  ✅ {doi_safe} / {var['name']} → {valeur[:60]}")
 
     # Écriture extraction.csv

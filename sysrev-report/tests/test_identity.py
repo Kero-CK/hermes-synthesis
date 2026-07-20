@@ -171,8 +171,9 @@ class ReportIdentityTests(unittest.TestCase):
             "doc": "10.1234/a", "identity_type": "doi", "variable": "v",
             "valeur": "value", "citation": "citation", "section": "Results",
         }]
-        with patch.object(report, "_call_llm_report", return_value="synthesis") as call:
-            result = report.llm_synthesize({
+        with patch.object(report, "_call_llm_report",
+                          return_value=("synthesis", "served-model")) as call:
+            result, served = report.llm_synthesize({
                 "question": "Question",
                 "review_mode": "scoping",
                 "extractions": extractions,
@@ -180,6 +181,7 @@ class ReportIdentityTests(unittest.TestCase):
                 "cells": {"v": {"cells_attempted": 1}},
             })
         self.assertEqual(result, "synthesis")
+        self.assertEqual(served, "served-model")
         user_message = call.call_args.args[1]
         self.assertIn("documents (articles)", user_message)
         self.assertIn("cells (article-variable rows)", user_message)

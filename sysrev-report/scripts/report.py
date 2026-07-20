@@ -273,8 +273,13 @@ def sanitize_data(text: str) -> str:
     return text.replace("<DATA>", "<CONTENT>").replace("</DATA>", "</CONTENT>")
 
 
-def _call_llm_report(prompt: str, user_message: str) -> str | None:
-    """Appelle l'API LLM pour la synthèse. Retourne le texte ou None."""
+def _call_llm_report(prompt: str, user_message: str) -> tuple[str | None, str]:
+    """Appelle l'API LLM pour la synthèse.
+
+    Retourne (texte, modèle servi) — le modèle servi est le champ
+    response["model"] de l'API, qui peut différer de l'alias demandé
+    (cf. experiments/ERRATUM-MODEL-IDENTITY.md). (None, "") en erreur.
+    """
     import urllib.request
     import urllib.error
 
@@ -283,7 +288,7 @@ def _call_llm_report(prompt: str, user_message: str) -> str | None:
     model = os.environ.get("LLM_SYNTHESIS_MODEL", "deepseek-chat")
 
     if not endpoint or not api_key:
-        return None
+        return None, ""
 
     url = f"{endpoint.rstrip('/')}/chat/completions"
     body = json.dumps({
@@ -303,16 +308,17 @@ def _call_llm_report(prompt: str, user_message: str) -> str | None:
         })
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = json.loads(resp.read().decode())
-            return data["choices"][0]["message"]["content"]
+            served_model = str(data.get("model", "") or "")
+            return data["choices"][0]["message"]["content"], served_model
     except Exception as e:
         print(f"  ⚠️  LLM report error: {e}", file=sys.stderr)
-        return None
+        return None, ""
 
 
-def llm_synthesize(context: dict) -> str:
+def llm_synthesize(context: dict) -> tuple[str, str]:
     """
-    Synthèse narrative via LLM.
-    Fallback : synthèse basique si l'API n'est pas configurée.
+    Synthèse narrative via LLM. Retourne (texte, modèle servi).
+    Fallback : message explicite si l'API n'est pas configurée.
     """
     # Prépare le résumé des extractions pour le prompt
     extractions = context.get("extractions", [])
@@ -349,12 +355,12 @@ def llm_synthesize(context: dict) -> str:
         "</DATA>"
     )
 
-    result = _call_llm_report(REPORT_PROMPT, user_message)
+    result, served_model = _call_llm_report(REPORT_PROMPT, user_message)
     if result:
-        return result
+        return result, served_model
 
     # Fallback : synthèse basique
-    return "(Synthèse LLM non disponible — configure LLM_API_ENDPOINT et LLM_API_KEY)"
+    return "(Synthèse LLM non disponible — configure LLM_API_ENDPOINT et LLM_API_KEY)", ""
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +372,8 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
                     candidates: list[dict] | None = None,
                     to_review: list[dict] | None = None,
                     synthesis: str | None = None,
-                    fulltext_exclusions: list[dict] | None = None) -> str:
+                    fulltext_exclusions: list[dict] | None = None,
+                    served_models: dict | None = None) -> str:
     """Génère un rapport de synthèse structuré. Intègre la synthèse LLM si fournie."""
 
     included = int(prisma.get("included", 0) or 0)
@@ -579,11 +586,17 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         f"**Articles sans donnée exploitable :** {articles_without_data}",
     ])
 
-    # Déterminer les modèles utilisés (réels ou fallback)
+    # Déterminer les modèles utilisés (réels ou fallback). L'alias demandé
+    # peut différer du modèle réellement servi par l'API : le second est
+    # journalisé (model_served) et affiché ici quand il est connu.
     screening_model = os.environ.get("LLM_SCREENING_MODEL", "mock")
     extraction_model = os.environ.get("LLM_EXTRACTION_MODEL", "mock")
     synthesis_model = os.environ.get("LLM_SYNTHESIS_MODEL", "mock")
     llm_configured = bool(os.environ.get("LLM_API_KEY"))
+
+    def served_suffix(key: str) -> str:
+        served = (served_models or {}).get(key) or ""
+        return f" — servi : {served}" if served else ""
 
     lines.extend([
         "---",
@@ -591,9 +604,9 @@ def generate_report(rid: str, protocol: str, prisma: dict, extractions: list[dic
         "## 🤖 Déclaration IA (PRISMA-trAIce)",
         "",
         f"- **Outil :** Hermes Synthesis (Hermes Agent + 8 skills pipeline)",
-        f"- **Modèle screening :** {screening_model} {'(via API)' if llm_configured else '(mock/fallback)'}",
-        f"- **Modèle extraction :** {extraction_model} {'(via API)' if llm_configured else '(mock/fallback)'}",
-        f"- **Modèle synthèse :** {synthesis_model} {'(via API)' if llm_configured else '(mock/fallback)'}",
+        f"- **Modèle screening :** {screening_model} {'(via API)' if llm_configured else '(mock/fallback)'}{served_suffix('screening')}",
+        f"- **Modèle extraction :** {extraction_model} {'(via API)' if llm_configured else '(mock/fallback)'}{served_suffix('extraction')}",
+        f"- **Modèle synthèse :** {synthesis_model} {'(via API)' if llm_configured else '(mock/fallback)'}{served_suffix('synthesis')}",
         f"- **Rôle de l'IA :** screening titres/abstracts, screening d'éligibilité texte intégral, extraction verbatim double passe, synthèse bornée",
         f"- **Rôle humain :** définition du protocole, validation des critères, revue des cas ambigus",
         f"- **Reproductibilité :** toutes les décisions journalisées dans `decisions.jsonl`",
@@ -850,10 +863,27 @@ def main(rid: str, use_mock: bool = False):
 
     print(f"📝 Génération du rapport pour {rid} ({review_mode})...")
 
+    # Modèles réellement servis, relus depuis le journal d'audit (champ
+    # model_served écrit par screen/screen_fulltext/extract). Plusieurs
+    # valeurs distinctes sont toutes affichées.
+    def served_from_journal(stages: tuple[str, ...]) -> str:
+        served = sorted({
+            str(e.get("model_served", "") or "")
+            for e in decisions
+            if e.get("stage") in stages and e.get("model_served")
+        })
+        return ", ".join(served)
+
+    served_models = {
+        "screening": served_from_journal(("screen_title_abstract", "screen_fulltext")),
+        "extraction": served_from_journal(("extract",)),
+        "synthesis": "",
+    }
+
     # Synthèse LLM (si configurée)
     synthesis = None
     if not use_mock:
-        synthesis = llm_synthesize({
+        synthesis, synthesis_served = llm_synthesize({
             "review_mode": review_mode,
             "question": question,
             "extractions": extractions,
@@ -868,6 +898,7 @@ def main(rid: str, use_mock: bool = False):
             },
             "cells": counts["by_variable"],
         })
+        served_models["synthesis"] = synthesis_served
         if synthesis:
             print("   🤖 Synthèse LLM générée")
         else:
@@ -877,7 +908,8 @@ def main(rid: str, use_mock: bool = False):
     report_md = generate_report(rid, protocol, prisma, extractions, screening_decisions,
                                 review_mode, candidates=candidates,
                                 to_review=to_review_list, synthesis=synthesis,
-                                fulltext_exclusions=fulltext_exclusions)
+                                fulltext_exclusions=fulltext_exclusions,
+                                served_models=served_models)
     prisma_md = generate_prisma_diagram(prisma)
     ris_content = generate_ris(extractions, candidates)
 

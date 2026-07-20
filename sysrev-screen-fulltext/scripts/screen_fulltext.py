@@ -198,8 +198,13 @@ def sanitize_document(text: str) -> str:
 
 
 def _call_llm_api(system_prompt: str, user_message: str = "",
-                  max_tokens: int | None = None) -> dict | None:
-    """Appelle une API compatible OpenAI. Retourne le JSON parsé ou None."""
+                  max_tokens: int | None = None) -> tuple[dict | None, str]:
+    """Appelle une API compatible OpenAI.
+
+    Retourne (JSON parsé, modèle servi) — le modèle servi est le champ
+    response["model"] de l'API, qui peut différer de l'alias demandé
+    (cf. experiments/ERRATUM-MODEL-IDENTITY.md). (None, "") en erreur.
+    """
     import urllib.request
     import urllib.error
 
@@ -214,7 +219,7 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
 
     if not endpoint or not api_key:
         print("  ⚠️  LLM non configuré : définis LLM_API_ENDPOINT et LLM_API_KEY.", file=sys.stderr)
-        return None
+        return None, ""
 
     url = f"{endpoint.rstrip('/')}/chat/completions"
     body = json.dumps({
@@ -235,6 +240,7 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
         })
         with urllib.request.urlopen(req, timeout=180) as resp:
             data = json.loads(resp.read().decode())
+            served_model = str(data.get("model", "") or "")
             choice = data["choices"][0]
             if choice.get("finish_reason") == "length":
                 print(
@@ -242,16 +248,16 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
                     "augmente LLM_SCREENING_MAX_TOKENS.",
                     file=sys.stderr,
                 )
-                return None
+                return None, served_model
             content = choice["message"]["content"]
-            return json.loads(content)
+            return json.loads(content), served_model
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:500] if e.fp else ""
         print(f"  ⚠️  LLM API HTTP {e.code}: {body}", file=sys.stderr)
-        return None
+        return None, ""
     except Exception as e:
         print(f"  ⚠️  LLM API error: {e}", file=sys.stderr)
-        return None
+        return None, ""
 
 
 def llm_screen_fulltext(fulltext: str, doc: str,
@@ -270,7 +276,7 @@ def llm_screen_fulltext(fulltext: str, doc: str,
         exclude_criteria=exc_text,
     )
     user_message = f"<DOCUMENT>\n{sanitize_document(fulltext)}\n</DOCUMENT>"
-    result = _call_llm_api(prompt, user_message=user_message)
+    result, served_model = _call_llm_api(prompt, user_message=user_message)
 
     if result and "score" in result:
         return {
@@ -281,6 +287,7 @@ def llm_screen_fulltext(fulltext: str, doc: str,
                 "LLM_FULLTEXT_SCREENING_MODEL",
                 os.environ.get("LLM_SCREENING_MODEL", "deepseek-chat"),
             ),
+            "model_served": served_model,
         }
 
     print("  ⚠️  LLM indisponible — article envoyé en revue manuelle", file=sys.stderr)
@@ -289,6 +296,7 @@ def llm_screen_fulltext(fulltext: str, doc: str,
         "reason": "api_error: LLM indisponible — non évalué, envoyé en revue humaine",
         "criterion": "",
         "model": "none (api_error)",
+        "model_served": served_model,
     }
 
 
@@ -351,6 +359,7 @@ def decide(score: float, threshold_include: float, threshold_exclude: float) -> 
 
 def log_decision(base: str, doc: str, decision: str, score: float, reason: str,
                  run_id: str, model: str = "mock@test", *, criterion: str = "",
+                 model_served: str = "",
                  identity_type: str = "doi", source_id: str = "", oa_url: str = ""):
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -365,6 +374,10 @@ def log_decision(base: str, doc: str, decision: str, score: float, reason: str,
     }
     if criterion:
         entry["criterion"] = criterion
+    # Modèle réellement servi par l'API (cf. ERRATUM-MODEL-IDENTITY.md).
+    # Champ additif : les anciens journaux restent valides sans lui.
+    if model_served:
+        entry["model_served"] = model_served
     if identity_type != "doi":
         entry.update({
             "identity_type": identity_type,
@@ -516,6 +529,7 @@ def main(rid: str, threshold_include: float = 0.75,
         log_decision(
             base, doc, decision, score, reason, run_id,
             model=model_used, criterion=criterion,
+            model_served=result.get("model_served", ""),
             identity_type=identity_type,
             source_id=candidate.get("source_id", decision_entry.get("source_id", "")),
             oa_url=candidate.get("oa_url", decision_entry.get("oa_url", "")),

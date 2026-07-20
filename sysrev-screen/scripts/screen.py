@@ -113,7 +113,7 @@ def sanitize_document(text: str) -> str:
 
 
 def _call_llm_api(system_prompt: str, user_message: str = "",
-                  max_tokens: int | None = None) -> dict | None:
+                  max_tokens: int | None = None) -> tuple[dict | None, str]:
     """
     Appelle une API compatible OpenAI pour le screening.
 
@@ -123,7 +123,9 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
       LLM_SCREENING_MODEL — ex: deepseek-chat (défaut si non défini)
       LLM_SCREENING_MAX_TOKENS — plafond de sortie (défaut : 8192)
 
-    Retourne la réponse JSON parsée ou None en cas d'erreur.
+    Retourne (réponse JSON parsée, modèle servi) — le modèle servi est le
+    champ response["model"] renvoyé par l'API, qui peut différer de l'alias
+    demandé (cf. experiments/ERRATUM-MODEL-IDENTITY.md). ("", None) en erreur.
     """
     import urllib.request
     import urllib.error
@@ -136,7 +138,7 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
 
     if not endpoint or not api_key:
         print("  ⚠️  LLM non configuré : définis LLM_API_ENDPOINT et LLM_API_KEY.", file=sys.stderr)
-        return None
+        return None, ""
 
     url = f"{endpoint.rstrip('/')}/chat/completions"
     body = json.dumps({
@@ -157,6 +159,7 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
         })
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode())
+            served_model = str(data.get("model", "") or "")
             choice = data["choices"][0]
             if choice.get("finish_reason") == "length":
                 print(
@@ -164,16 +167,16 @@ def _call_llm_api(system_prompt: str, user_message: str = "",
                     "augmente LLM_SCREENING_MAX_TOKENS.",
                     file=sys.stderr,
                 )
-                return None
+                return None, served_model
             content = choice["message"]["content"]
-            return json.loads(content)
+            return json.loads(content), served_model
     except urllib.error.HTTPError as e:
         body = e.read().decode()[:500] if e.fp else ""
         print(f"  ⚠️  LLM API HTTP {e.code}: {body}", file=sys.stderr)
-        return None
+        return None, ""
     except Exception as e:
         print(f"  ⚠️  LLM API error: {e}", file=sys.stderr)
-        return None
+        return None, ""
 
 
 def llm_screen(title: str, abstract: str, doi: str,
@@ -200,7 +203,7 @@ def llm_screen(title: str, abstract: str, doi: str,
         "</DOCUMENT>"
     )
 
-    result = _call_llm_api(prompt, user_message=user_message)
+    result, served_model = _call_llm_api(prompt, user_message=user_message)
 
     if result and "score" in result:
         # Retour formaté comme attendu par le reste du script
@@ -208,6 +211,7 @@ def llm_screen(title: str, abstract: str, doi: str,
             "score": max(0.0, min(1.0, float(result.get("score", 0.5)))),
             "reason": result.get("reason", "évaluation LLM"),
             "model": os.environ.get("LLM_SCREENING_MODEL", "deepseek-chat"),
+            "model_served": served_model,
         }
 
     print("  ⚠️  LLM indisponible — article envoyé en revue manuelle", file=sys.stderr)
@@ -215,6 +219,7 @@ def llm_screen(title: str, abstract: str, doi: str,
         "score": 0.5,
         "reason": "api_error: LLM indisponible — non évalué, envoyé en revue humaine",
         "model": "none (api_error)",
+        "model_served": served_model,
     }
 
 
@@ -277,7 +282,7 @@ def article_identity(article: dict) -> tuple[str, str] | None:
 # ---------------------------------------------------------------------------
 
 def log_decision(base: str, doi: str, decision: str, score: float, reason: str,
-                 run_id: str, model: str = "mock@test", *,
+                 run_id: str, model: str = "mock@test", *, model_served: str = "",
                  identity_type: str = "doi", source_id: str = "", oa_url: str = ""):
     entry = {
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -290,6 +295,11 @@ def log_decision(base: str, doi: str, decision: str, score: float, reason: str,
         "actor": "ai",
         "reason": reason,
     }
+    # Modèle réellement servi par l'API (peut différer de l'alias demandé,
+    # cf. experiments/ERRATUM-MODEL-IDENTITY.md). Champ additif : les anciens
+    # journaux et lecteurs restent valides sans lui.
+    if model_served:
+        entry["model_served"] = model_served
     if identity_type != "doi":
         entry.update({
             "identity_type": identity_type,
@@ -417,6 +427,7 @@ def main(rid: str, threshold_include: float = 0.75,
             reason,
             run_id,
             model=model_used,
+            model_served=result.get("model_served", ""),
             identity_type=identity_type,
             source_id=article.get("source_id", ""),
             oa_url=article.get("oa_url", ""),

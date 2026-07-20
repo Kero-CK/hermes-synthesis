@@ -136,6 +136,11 @@ Vérifier après chaque modification de l'une ou l'autre fonction.
 
 # Journalisation
 
+Quand l'appel LLM est réel, le champ `model_served` enregistre le modèle
+réellement servi par l'API (`response.model`), qui peut différer de l'alias
+demandé (cf. `experiments/ERRATUM-MODEL-IDENTITY.md`). Champ additif : absent
+en mode mock et dans les anciens journaux, sans impact sur les lecteurs.
+
 Chaque article screené génère une ligne dans `decisions.jsonl` :
 ```json
 {"ts":"...","doc":"10.xxx","stage":"screen_title_abstract","decision":"include",

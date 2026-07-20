@@ -91,6 +91,11 @@ doi,variable,valeur,citation,section
 
 # Journalisation
 
+Quand l'appel LLM est réel, le champ `model_served` enregistre le modèle
+réellement servi par l'API (`response.model`), qui peut différer de l'alias
+demandé (cf. `experiments/ERRATUM-MODEL-IDENTITY.md`). Champ additif : absent
+en mode mock et dans les anciens journaux, sans impact sur les lecteurs.
+
 ```json
 {"ts":"...","doc":"10.xxx","stage":"extract","variable":"secteur",
  "decision":"extracted","reason":"Extraction réussie"}
