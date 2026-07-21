@@ -115,7 +115,9 @@ connecteurs disponibles sont OpenAlex et PubMed.
   uniquement aux appels E-utilities et ne doivent apparaître ni dans
   `candidates.csv`, ni dans `manifest.json`, ni dans les logs. L'identité
   Hermes d'un article est `https://pubmed.ncbi.nlm.nih.gov/{PMID}/` ; un
-  PMCID renseigne `oa_url` avec l'URL PMC correspondante.
+  PMCID renseigne `oa_url` avec l'URL PMC canonique
+  `https://pmc.ncbi.nlm.nih.gov/articles/{PMCID}/` ; le texte intégral PMC est
+  ensuite récupéré via EFetch XML par sysrev-fulltext.
 - **Sci-Hub désactivé.** Ne pas utiliser ni proposer Sci-Hub.
 - **Épinglage de version.** Noter l'endpoint et la version de chaque API
   source utilisée dans `manifest.json`.

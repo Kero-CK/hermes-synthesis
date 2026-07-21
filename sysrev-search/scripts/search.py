@@ -361,6 +361,22 @@ def _xml_first_element(root: object, name: str):
     return elements[0] if elements else None
 
 
+def _xml_direct_elements(root: object, name: str) -> list:
+    """Return only direct XML children by local name."""
+    if root is None:
+        return []
+    try:
+        children = list(root)
+    except TypeError:
+        return []
+    return [node for node in children if _xml_local_name(node.tag) == name]
+
+
+def _xml_first_direct_element(root: object, name: str):
+    elements = _xml_direct_elements(root, name)
+    return elements[0] if elements else None
+
+
 def _xml_text(node: object) -> str:
     """Flatten nested XML markup into normalized human-readable text."""
     import re
@@ -417,12 +433,9 @@ def _pubmed_article_to_result(article: object) -> dict | None:
 
     doi = ""
     pmcid = ""
-    article_id_lists = _xml_elements(article, "ArticleIdList")
-    article_id_nodes = []
-    for article_id_list in article_id_lists:
-        article_id_nodes.extend(_xml_elements(article_id_list, "ArticleId"))
-    if not article_id_nodes:
-        article_id_nodes = _xml_elements(article, "ArticleId")
+    pubmed_data = _xml_first_direct_element(article, "PubmedData")
+    article_id_list = _xml_first_direct_element(pubmed_data, "ArticleIdList")
+    article_id_nodes = _xml_direct_elements(article_id_list, "ArticleId")
     for article_id in article_id_nodes:
         value = _xml_text(article_id)
         id_type = article_id.attrib.get("IdType", "").lower()
@@ -433,7 +446,9 @@ def _pubmed_article_to_result(article: object) -> dict | None:
         elif id_type in {"pmc", "pmcid"} and not pmcid:
             pmcid = value
     if not doi:
-        for elocation in _xml_elements(article, "ELocationID"):
+        medline_citation = _xml_first_direct_element(article, "MedlineCitation")
+        main_article = _xml_first_direct_element(medline_citation, "Article")
+        for elocation in _xml_elements(main_article, "ELocationID"):
             if elocation.attrib.get("EIdType", "").lower() == "doi":
                 doi = _xml_text(elocation)
                 if doi:

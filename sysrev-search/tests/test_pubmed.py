@@ -72,12 +72,32 @@ def article_xml(
     title: str | None = None,
     doi: str | None = "10.1234/example",
     pmcid: str | None = None,
+    elocation_doi: str | None = None,
+    reference_doi: str | None = None,
+    reference_pmcid: str | None = None,
     year: int = 2024,
     abstract: str = "Abstract text.",
 ) -> str:
     title = title if title is not None else f"Article {pmid}"
     doi_xml = f'<ArticleId IdType="doi">{doi}</ArticleId>' if doi else ""
     pmc_xml = f'<ArticleId IdType="pmc">{pmcid}</ArticleId>' if pmcid else ""
+    elocation_xml = (
+        f'<ELocationID EIdType="doi">{elocation_doi}</ELocationID>'
+        if elocation_doi else ""
+    )
+    reference_ids = "".join(
+        part for part in (
+            f'<ArticleId IdType="doi">{reference_doi}</ArticleId>'
+            if reference_doi else "",
+            f'<ArticleId IdType="pmc">{reference_pmcid}</ArticleId>'
+            if reference_pmcid else "",
+        ) if part
+    )
+    reference_xml = (
+        f"<ReferenceList><Reference><ArticleIdList>{reference_ids}</ArticleIdList>"
+        "</Reference></ReferenceList>"
+        if reference_ids else ""
+    )
     return f"""
       <PubmedArticle>
         <MedlineCitation>
@@ -86,9 +106,10 @@ def article_xml(
             <ArticleTitle>{title}</ArticleTitle>
             <Abstract><AbstractText>{abstract}</AbstractText></Abstract>
             <Journal><JournalIssue><PubDate><Year>{year}</Year></PubDate></JournalIssue></Journal>
+            {elocation_xml}
           </Article>
         </MedlineCitation>
-        <PubmedData><ArticleIdList>{doi_xml}{pmc_xml}</ArticleIdList></PubmedData>
+        <PubmedData><ArticleIdList>{doi_xml}{pmc_xml}</ArticleIdList>{reference_xml}</PubmedData>
       </PubmedArticle>
     """
 
@@ -260,6 +281,55 @@ class PubMedTests(unittest.TestCase):
                 row["source_id"],
                 f"https://pubmed.ncbi.nlm.nih.gov/{row['source_id'].rstrip('/').rsplit('/', 1)[-1]}/",
             )
+
+    def test_reference_pmcid_is_not_used_when_main_article_has_none(self):
+        result, _, _ = self.call_pubmed(
+            [esearch(1), efetch_xml(article_xml(11, doi=None, reference_pmcid="PMCREF"))]
+        )
+        self.assertEqual(result[0][0]["oa_url"], "")
+
+    def test_reference_doi_is_not_used_when_main_article_has_none(self):
+        result, _, _ = self.call_pubmed(
+            [esearch(1), efetch_xml(article_xml(12, doi=None, reference_doi="10.9999/ref"))]
+        )
+        self.assertEqual(result[0][0]["doi"], "")
+
+    def test_primary_article_ids_are_preserved_over_nested_reference_ids(self):
+        result, _, _ = self.call_pubmed(
+            [
+                esearch(1),
+                efetch_xml(
+                    article_xml(
+                        13,
+                        doi="10.1234/main",
+                        pmcid="PMCMAIN",
+                        reference_doi="10.9999/ref",
+                        reference_pmcid="PMCREF",
+                    )
+                ),
+            ]
+        )
+        self.assertEqual(result[0][0]["doi"], "10.1234/main")
+        self.assertEqual(
+            result[0][0]["oa_url"],
+            "https://pmc.ncbi.nlm.nih.gov/articles/PMCMAIN/",
+        )
+
+    def test_elocation_doi_fallback_uses_the_true_article_only(self):
+        result, _, _ = self.call_pubmed(
+            [
+                esearch(1),
+                efetch_xml(
+                    article_xml(
+                        14,
+                        doi=None,
+                        elocation_doi="10.1234/elocation",
+                        reference_doi="10.9999/ref",
+                    )
+                ),
+            ]
+        )
+        self.assertEqual(result[0][0]["doi"], "10.1234/elocation")
 
     def test_complex_title_and_abstract_xml_is_flattened_in_order(self):
         complex_article = """
