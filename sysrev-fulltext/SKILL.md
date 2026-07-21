@@ -2,8 +2,9 @@
 name: sysrev-fulltext
 description: >
   Récupère et parse les textes intégraux des articles inclus après screening.
-  Télécharge les PDF open access, parse les PDF dropzone, convertit le tout
-  en Markdown exploitable. Correspond au module M5 du pipeline Hermes Synthesis.
+  Récupère les articles PMC par EFetch XML, télécharge les PDF non-PMC et
+  parse les PDF dropzone, puis convertit le tout en Markdown exploitable.
+  Correspond au module M5 du pipeline Hermes Synthesis.
 inputs:
   - /reviews/<id>/decisions.jsonl (décisions de screening finales)
   - /reviews/<id>/candidates.csv (pour les URLs OA et chemins dropzone)
@@ -23,9 +24,10 @@ requires:
 # Objectif
 
 Récupérer le texte intégral de chaque article inclus lors du screening.
-Deux sources : URL open access (téléchargement automatique) et dropzone
-(PDF fournis par l'utilisateur). Convertir en Markdown pour les étapes
-suivantes (extraction notamment).
+Pour les notices PMC, utiliser EFetch XML officiel et convertir le JATS en
+Markdown. Pour les autres articles, utiliser l'URL open access puis la
+dropzone (PDF fournis par l'utilisateur). Convertir en Markdown pour les
+étapes suivantes (extraction notamment).
 
 # Pré-conditions
 
@@ -52,11 +54,16 @@ suivantes (extraction notamment).
    ```
 
 3. Le script, pour chaque article inclus :
-   - Cherche le PDF : URL open access d'abord, dropzone ensuite
-   - Parse le PDF en Markdown (via `pymupdf4llm` en mode réel)
+   - Réutilise d'abord un Markdown existant et valide
+   - Regroupe les PMCID des URL PMC canoniques ou historiques (`.../articles/PMC.../pdf/`) et les récupère en un ou plusieurs appels EFetch PMC POST
+   - Convertit les vrais corps JATS PMC en Markdown, en conservant titre,
+     résumé, titres de sections et paragraphes ; un texte de 500 caractères
+     ou moins est refusé
+   - Pour une URL OA non-PMC, télécharge puis parse le PDF via
+     `pymupdf4llm` en mode réel ; après échec, essaie la dropzone
+   - Pour un PMCID sans corps exploitable, essaie ensuite la dropzone ; il ne
+     faut jamais télécharger directement `.../articles/PMC.../pdf/`
    - Écrit le résultat dans `sources/<doi_safe>.md`
-   - Réutilise sans téléchargement un Markdown déjà présent et de plus de 500
-     caractères, en journalisant un nouvel événement `retrieved` explicite
    - Si le parsing échoue, marque `retrieval_failed`
 
 4. Présente le résumé : combien récupérés, combien en échec.
@@ -65,6 +72,11 @@ suivantes (extraction notamment).
 
 - **Ne jamais inventer de contenu.** Si le PDF est inaccessible, passer
   en `retrieval_failed` plutôt que de générer un faux texte.
+- **PMC officiel.** Les URL PMC canoniques et anciennes URL `/pdf/` servent
+  uniquement à extraire le PMCID ; le texte est obtenu par EFetch XML POST
+  avec `NCBI_EMAIL` obligatoire et `NCBI_API_KEY` facultative. Une erreur
+  globale EFetch arrête le run avant toute écriture de décisions ou de
+  compteurs. Les secrets ne sont jamais journalisés.
 - **Nom de fichier sûr.** Remplacer `/` par `_` dans les DOI pour les
   noms de fichiers (`10.1234_mock001.md`).
 - **Chemin d'échec.** Parsing raté → `retrieval_failed` journalisé dans

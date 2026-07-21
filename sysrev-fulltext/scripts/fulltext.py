@@ -19,7 +19,12 @@ import os
 import re
 import sys
 import tempfile
+import time
+import unicodedata
+import urllib.error
+import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
 
@@ -143,14 +148,301 @@ def select_included_dois(entries: list[dict]) -> tuple[list[str], int]:
 
 
 # ---------------------------------------------------------------------------
-# Téléchargement de PDF
+# PMC XML et téléchargement PDF non-PMC
 # ---------------------------------------------------------------------------
+
+PMC_EFETCH_ENDPOINT = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+PMC_BATCH_SIZE = 200
+PMC_REQUEST_INTERVAL_WITHOUT_KEY = 1 / 3
+PMC_REQUEST_INTERVAL_WITH_KEY = 1 / 10
+_PMC_URL = re.compile(
+    r"^https://pmc\.ncbi\.nlm\.nih\.gov/articles/(PMC[0-9]+)(?:/pdf)?/?$"
+)
+
+
+class PmcFetchError(RuntimeError):
+    """Erreur globale d'EFetch PMC, avant toute écriture de revue."""
+
+
+def extract_pmcid_from_url(url: str) -> str | None:
+    """Extrait un PMCID d'une URL PMC canonique ou historique /pdf/."""
+    if not isinstance(url, str):
+        return None
+    match = _PMC_URL.fullmatch(url.strip())
+    return match.group(1) if match else None
+
+
+def _xml_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1].lower()
+
+
+def _xml_text(node: ET.Element) -> str:
+    return " ".join("".join(node.itertext()).split())
+
+
+def _pmc_article_meta(article: ET.Element) -> ET.Element | None:
+    """Retourne les métadonnées de l'article principal, hors références."""
+    return next(
+        (node for node in article.iter() if _xml_local_name(node.tag) == "article-meta"),
+        None,
+    )
+
+
+def _pmc_article_id(article: ET.Element, id_types: set[str]) -> str:
+    metadata = _pmc_article_meta(article)
+    if metadata is None:
+        return ""
+    for node in metadata.iter():
+        if _xml_local_name(node.tag) not in {"article-id", "articleid"}:
+            continue
+        id_type = (
+            node.attrib.get("pub-id-type", "")
+            or node.attrib.get("IdType", "")
+        ).lower()
+        if id_type in id_types:
+            value = _xml_text(node)
+            if value:
+                return value
+    return ""
+
+
+def extract_pmcid_from_article(article: ET.Element) -> str | None:
+    """Extrait l'identifiant PMC d'un article JATS."""
+    value = _pmc_article_id(article, {"pmc", "pmcid"})
+    return value.upper() if value.upper().startswith("PMC") else None
+
+
+def extract_pmc_doi_from_article(article: ET.Element) -> str:
+    """Extrait le DOI de l'article principal, jamais ceux des références."""
+    return _pmc_article_id(article, {"doi"})
+
+
+def extract_pmc_title_from_article(article: ET.Element) -> str:
+    """Extrait le titre de l'article principal, hors titres bibliographiques."""
+    metadata = _pmc_article_meta(article)
+    if metadata is None:
+        return ""
+    title = next(
+        (node for node in metadata.iter() if _xml_local_name(node.tag) == "article-title"),
+        None,
+    )
+    return _xml_text(title) if title is not None else ""
+
+
+def _append_markdown_line(lines: list[str], line: str) -> None:
+    line = line.strip()
+    if line and (not lines or lines[-1] != line):
+        lines.append(line)
+
+
+def _render_jats_list(node: ET.Element, lines: list[str]) -> None:
+    for child in node.iter():
+        if _xml_local_name(child.tag) == "list-item":
+            _append_markdown_line(lines, "- " + _xml_text(child))
+
+
+def _render_jats_section(node: ET.Element, lines: list[str], level: int) -> None:
+    title = next(
+        (child for child in list(node) if _xml_local_name(child.tag) == "title"),
+        None,
+    )
+    if title is not None:
+        _append_markdown_line(
+            lines, f"{'#' * min(level, 6)} {_xml_text(title)}"
+        )
+    _render_jats_children(node, lines, level + 1)
+
+
+def _render_jats_children(node: ET.Element, lines: list[str], level: int) -> None:
+    for child in list(node):
+        name = _xml_local_name(child.tag)
+        if name in {"title", "label"}:
+            continue
+        if name == "sec":
+            _render_jats_section(child, lines, level)
+        elif name == "p":
+            _append_markdown_line(lines, _xml_text(child))
+        elif name == "list":
+            _render_jats_list(child, lines)
+        elif name in {"disp-quote", "boxed-text"}:
+            _render_jats_children(child, lines, level)
+        else:
+            _render_jats_children(child, lines, level)
+
+
+def pmc_article_to_markdown(article: ET.Element) -> str | None:
+    """Convertit un article JATS PMC avec un vrai body en Markdown."""
+    body = next(
+        (node for node in article.iter() if _xml_local_name(node.tag) == "body"),
+        None,
+    )
+    if body is None or len(_xml_text(body)) <= 500:
+        return None
+
+    lines: list[str] = []
+    metadata = _pmc_article_meta(article)
+    title = next(
+        (node for node in metadata.iter() if _xml_local_name(node.tag) == "article-title"),
+        None,
+    ) if metadata is not None else None
+    if title is not None:
+        _append_markdown_line(lines, "# " + _xml_text(title))
+
+    abstracts = [
+        node for node in metadata.iter() if _xml_local_name(node.tag) == "abstract"
+    ] if metadata is not None else []
+    for abstract in abstracts:
+        _append_markdown_line(lines, "## Abstract")
+        abstract_text = _xml_text(abstract)
+        if abstract_text:
+            _append_markdown_line(lines, abstract_text)
+
+    _render_jats_children(body, lines, 2)
+    markdown = "\n\n".join(lines).strip() + "\n"
+    return markdown if len(markdown) > 500 else None
+
+
+def normalize_identity_doi(value: str) -> str:
+    """Normalise un DOI pour une comparaison d'identité, sans le réécrire en sortie."""
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip().casefold()
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):].strip()
+            break
+    return normalized.rstrip(" .")
+
+
+def normalize_identity_title(value: str) -> str:
+    """Normalise un titre pour vérifier une identité sans modifier les données."""
+    if not isinstance(value, str):
+        return ""
+    value = unicodedata.normalize("NFKC", value).casefold()
+    return re.sub(r"[^\w]+", " ", value, flags=re.UNICODE).strip()
+
+
+def validate_pmc_identity(
+    pmc_record: dict,
+    candidate_doi: str,
+    candidate_title: str,
+) -> tuple[bool, str]:
+    """Refuse un corps PMC dont l'identité XML contredit le candidat."""
+    xml_doi = normalize_identity_doi(pmc_record.get("doi", ""))
+    expected_doi = normalize_identity_doi(candidate_doi)
+    if xml_doi and expected_doi:
+        if xml_doi != expected_doi:
+            return False, (
+                f"DOI XML {xml_doi!r} différent du DOI candidat {expected_doi!r}"
+            )
+        return True, "DOI XML concordant"
+
+    xml_title = normalize_identity_title(pmc_record.get("title", ""))
+    expected_title = normalize_identity_title(candidate_title)
+    if not xml_title or not expected_title:
+        return False, "titre absent ou insuffisant pour vérifier l'identité"
+    if xml_title != expected_title:
+        return False, "titre XML différent du titre candidat après normalisation"
+    return True, "titre XML concordant après normalisation"
+
+
+def markdown_matches_candidate_title(markdown: str, candidate_title: str) -> bool:
+    """Vérifie localement un cache Markdown PMC avant de le réutiliser."""
+    markdown_title = next(
+        (
+            line[2:].strip()
+            for line in markdown.splitlines()
+            if line.startswith("# ")
+        ),
+        "",
+    )
+    return bool(markdown_title) and (
+        normalize_identity_title(markdown_title)
+        == normalize_identity_title(candidate_title)
+    )
+
+
+def _parse_pmc_xml(payload: bytes, requested: set[str]) -> dict[str, dict | None]:
+    try:
+        root = ET.fromstring(payload)
+    except ET.ParseError as exc:
+        raise PmcFetchError("EFetch PMC XML invalide") from exc
+
+    results: dict[str, dict | None] = {}
+    for article in root.iter():
+        if _xml_local_name(article.tag) != "article":
+            continue
+        pmcid = extract_pmcid_from_article(article)
+        if pmcid and pmcid in requested:
+            results[pmcid] = {
+                "markdown": pmc_article_to_markdown(article),
+                "doi": extract_pmc_doi_from_article(article),
+                "title": extract_pmc_title_from_article(article),
+            }
+    return results
+
+
+def fetch_pmc_xml(pmcids: list[str], timeout: int = 60) -> dict[str, dict | None]:
+    """Récupère les PMCID par EFetch XML groupé, sans écrire de fichier."""
+    if not pmcids:
+        return {}
+    email = os.environ.get("NCBI_EMAIL", "")
+    api_key = os.environ.get("NCBI_API_KEY", "")
+    if not email:
+        raise PmcFetchError("NCBI_EMAIL absent")
+
+    requested = set(pmcids)
+    results: dict[str, dict | None] = {}
+    batches = [
+        pmcids[start:start + PMC_BATCH_SIZE]
+        for start in range(0, len(pmcids), PMC_BATCH_SIZE)
+    ]
+    for index, batch in enumerate(batches):
+        if index:
+            time.sleep(
+                PMC_REQUEST_INTERVAL_WITH_KEY
+                if api_key else PMC_REQUEST_INTERVAL_WITHOUT_KEY
+            )
+        params = {
+            "db": "pmc",
+            "id": ",".join(batch),
+            "retmode": "xml",
+            "tool": "hermes_synthesis",
+            "email": email,
+        }
+        if api_key:
+            params["api_key"] = api_key
+        request = urllib.request.Request(
+            PMC_EFETCH_ENDPOINT,
+            data=urllib.parse.urlencode(params).encode("utf-8"),
+            headers={
+                "Accept": "application/xml",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = response.read()
+        except urllib.error.HTTPError as exc:
+            raise PmcFetchError(f"EFetch PMC HTTP {exc.code}") from exc
+        except Exception as exc:
+            raise PmcFetchError("EFetch PMC erreur réseau") from exc
+        results.update(_parse_pmc_xml(payload, requested))
+    return results
+
 
 def download_pdf(url: str, timeout: int = 30) -> str | None:
     """
     Télécharge un PDF depuis une URL vers un fichier temporaire.
     Retourne le chemin du fichier temporaire, ou None en cas d'échec.
     """
+    if extract_pmcid_from_url(url):
+        print(
+            "    ⚠️  Téléchargement PDF PMC désactivé : utiliser EFetch XML.",
+            file=sys.stderr,
+        )
+        return None
     try:
         req = urllib.request.Request(url)
         req.add_header("User-Agent", "HermesSynthesis/0.1 (mailto:hermes-synthesis@example.org)")
@@ -353,6 +645,28 @@ def log_decision(base: str, doi: str, decision: str, reason: str, run_id: str, *
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+def _dropzone_pdf_path(base: str, doc: str, identity_type: str) -> str | None:
+    dropzone_dir = f"{base}/inputs/pdfs"
+    if not os.path.isdir(dropzone_dir):
+        return None
+    path = os.path.join(
+        dropzone_dir,
+        safe_document_filename(doc, identity_type) + ".pdf",
+    )
+    return path if os.path.isfile(path) else None
+
+
+def _parse_pdf_file(pdf_path: str, success_reason: str) -> tuple[str | None, str]:
+    try:
+        content = parse_pdf_real(pdf_path)
+    except Exception as exc:
+        return None, f"{success_reason} — parsing échoué"
+    if content and len(content) > 500:
+        return content, success_reason
+    length = len(content or "")
+    return None, f"{success_reason} — texte inférieur à 500 caractères ({length})"
+
+
 # ---------------------------------------------------------------------------
 # Point d'entrée
 # ---------------------------------------------------------------------------
@@ -375,12 +689,10 @@ def main(rid: str, use_mock: bool = False):
 
     manifest_path = f"{base}/manifest.json"
     manifest = json.load(open(manifest_path, encoding="utf-8"))
-    manifest["journal_unknown_entries"] = unknown_entries
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     if not included_documents:
         print("⚠️  Aucun article inclus trouvé dans decisions.jsonl.")
+        manifest["journal_unknown_entries"] = unknown_entries
         prisma_path = f"{base}/prisma.json"
         if os.path.exists(prisma_path):
             with open(prisma_path, encoding="utf-8") as f:
@@ -409,7 +721,54 @@ def main(rid: str, use_mock: bool = False):
                 for _, identity_value in candidate_identity_values(row):
                     candidates_by_identity[identity_value] = row
 
+    article_contexts = []
+    pmcids = []
+    for decision_entry in included_documents:
+        doc = str(decision_entry.get("doc", "") or "").strip()
+        candidate = candidates_by_identity.get(doc, {})
+        identity = candidate_identity(candidate)
+        identity_type = decision_entry.get("identity_type", "") or (identity[0] if identity else "")
+        source_id = candidate.get("source_id", decision_entry.get("source_id", ""))
+        oa_url = str(candidate.get("oa_url", "") or decision_entry.get("oa_url", "")).strip()
+        actual_doi = candidate.get("doi", "") or decision_entry.get("doi", "")
+        candidate_title = str(candidate.get("title", "") or "").strip()
+        doi_safe = safe_document_filename(doc, identity_type)
+        md_path = f"{sources_dir}/{doi_safe}.md"
+        content = read_valid_markdown(md_path)
+        pmcid = extract_pmcid_from_url(oa_url)
+        if (
+            pmcid
+            and content is not None
+            and not markdown_matches_candidate_title(content, candidate_title)
+        ):
+            content = None
+        if pmcid and not use_mock and pmcid not in pmcids:
+            pmcids.append(pmcid)
+        article_contexts.append({
+            "decision_entry": decision_entry,
+            "doc": doc,
+            "identity_type": identity_type,
+            "source_id": source_id,
+            "oa_url": oa_url,
+            "actual_doi": actual_doi,
+            "candidate_title": candidate_title,
+            "doi_safe": doi_safe,
+            "md_path": md_path,
+            "content": content,
+            "reused_existing": content is not None,
+            "pmcid": pmcid,
+        })
+
+    try:
+        pmc_markdown = {} if use_mock else fetch_pmc_xml(pmcids)
+    except PmcFetchError as exc:
+        print(f"❌ EFetch PMC groupé échoué : {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
     os.makedirs(sources_dir, exist_ok=True)
+    manifest["journal_unknown_entries"] = unknown_entries
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
 
     success = 0
     failed = 0
@@ -419,62 +778,75 @@ def main(rid: str, use_mock: bool = False):
         print("   (mode mock — textes simulés)")
     print()
 
-    for decision_entry in included_documents:
-        doc = str(decision_entry.get("doc", "") or "").strip()
-        candidate = candidates_by_identity.get(doc, {})
-        identity = candidate_identity(candidate)
-        identity_type = decision_entry.get("identity_type", "") or (identity[0] if identity else "")
-        source_id = candidate.get("source_id", decision_entry.get("source_id", ""))
-        oa_url = str(candidate.get("oa_url", "") or decision_entry.get("oa_url", "")).strip()
-        actual_doi = candidate.get("doi", "") or decision_entry.get("doi", "")
-        doi_safe = safe_document_filename(doc, identity_type)
-        md_path = f"{sources_dir}/{doi_safe}.md"
-
-        content = read_valid_markdown(md_path)
-        reused_existing = content is not None
+    for context in article_contexts:
+        doc = context["doc"]
+        identity_type = context["identity_type"]
+        source_id = context["source_id"]
+        oa_url = context["oa_url"]
+        actual_doi = context["actual_doi"]
+        doi_safe = context["doi_safe"]
+        md_path = context["md_path"]
+        pmcid = context["pmcid"]
+        candidate_title = context["candidate_title"]
+        content = context["content"]
+        reused_existing = context["reused_existing"]
         reason = ""
+        identity_conflict = False
 
         if content is not None:
             reason = "Markdown existant valide réutilisé sans nouveau téléchargement"
         elif use_mock:
             content = mock_fulltext(doc)
             reason = "mock — texte simulé pour test"
-        elif oa_url:
-            # Télécharger et parser le PDF OA
-            print(f"    📥 Téléchargement {oa_url[:60]}...")
-            pdf_path = download_pdf(oa_url)
-            if pdf_path:
-                try:
-                    content = parse_pdf_real(pdf_path)
-                    reason = f"PDF parsé avec pymupdf4llm (OA: {oa_url[:50]})"
-                    os.unlink(pdf_path)  # Nettoie le fichier temporaire
-                except Exception as e:
-                    reason = f"Parsing échoué: {e}"
+
+        if content is None and not use_mock:
+            if pmcid:
+                pmc_record = pmc_markdown.get(pmcid)
+                if pmc_record is not None:
+                    identity_ok, identity_reason = validate_pmc_identity(
+                        pmc_record, actual_doi, candidate_title
+                    )
+                    if not identity_ok:
+                        identity_conflict = True
+                        reason = f"Identité PMC refusée : {identity_reason}"
+                    elif pmc_record.get("markdown"):
+                        content = pmc_record["markdown"]
+                        reason = f"XML PMC JATS parsé via EFetch ({pmcid})"
+                    else:
+                        reason = f"Corps XML PMC inexploitable ({pmcid})"
+                else:
+                    reason = f"Notice PMC absente de la réponse EFetch ({pmcid})"
+
+            if content is None and not pmcid and oa_url:
+                print(f"    📥 Téléchargement {oa_url[:60]}...")
+                pdf_path = download_pdf(oa_url)
+                if pdf_path:
+                    content, reason = _parse_pdf_file(
+                        pdf_path,
+                        f"PDF parsé avec pymupdf4llm (OA: {oa_url[:50]})",
+                    )
                     if os.path.exists(pdf_path):
                         os.unlink(pdf_path)
-            else:
-                reason = "Téléchargement PDF échoué"
-        else:
-            # Chercher dans la dropzone
-            dropzone_dir = f"{base}/inputs/pdfs"
-            pdf_path = None
-            if os.path.isdir(dropzone_dir):
-                doi_filename = safe_document_filename(doc, identity_type) + ".pdf"
-                candidate = os.path.join(dropzone_dir, doi_filename)
-                if os.path.exists(candidate):
-                    pdf_path = candidate
+                else:
+                    reason = "Téléchargement PDF OA échoué"
 
-            if pdf_path:
-                try:
-                    content = parse_pdf_real(pdf_path)
-                    reason = "PDF parsé depuis dropzone"
-                except Exception as e:
-                    reason = f"Parsing dropzone échoué: {e}"
-            else:
-                reason = "PDF non disponible (ni OA téléchargeable, ni dropzone)"
-
-        if content and len(content) <= 500:
-            reason = f"Parsing quasi-vide ({len(content)} caractères — PDF scanné ou slides ?)"
+            if content is None and not identity_conflict:
+                pdf_path = _dropzone_pdf_path(base, doc, identity_type)
+                if pdf_path:
+                    drop_content, drop_reason = _parse_pdf_file(
+                        pdf_path, "PDF parsé depuis dropzone"
+                    )
+                    if drop_content:
+                        content = drop_content
+                        reason = drop_reason
+                    elif reason:
+                        reason += "; " + drop_reason
+                    else:
+                        reason = drop_reason
+                elif reason:
+                    reason += "; PDF non disponible dans la dropzone"
+                else:
+                    reason = "PDF non disponible (ni OA non-PMC, ni dropzone)"
 
         if content and len(content) > 500:
             if not reused_existing:
