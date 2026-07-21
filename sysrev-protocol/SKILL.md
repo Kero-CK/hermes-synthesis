@@ -65,11 +65,13 @@ valide pointant vers le vault.
    e. **Le CODEBOOK d'extraction** — les variables à extraire de chaque
       article inclus. Chaque variable a un nom et une description courte.
    f. **Le plan de recherche multi-source** — demande quelles sources utiliser
-      (`openalex`, `pubmed`, ou les deux) et explique leur utilité : OpenAlex
+      (`openalex`, `pubmed` et/ou `eric`) et explique leur utilité : OpenAlex
       apporte une couverture multidisciplinaire générale ; PubMed apporte une
-      couverture biomédicale spécialisée. Ne recommande PubMed que si le
-      sujet concerne la santé, la médecine ou les sciences de la vie ; le
-      choix final appartient toujours au chercheur.
+      couverture biomédicale spécialisée ; ERIC apporte une couverture
+      spécialisée des publications en sciences de l'éducation. Ne recommande
+      PubMed que si le sujet concerne la santé, la médecine ou les sciences de
+      la vie ; ne recommande ERIC que si le sujet concerne l'éducation ou la
+      formation. Le choix final appartient toujours au chercheur.
       Pour chaque source choisie, propose une requête adaptée sans demander au
       chercheur d'en connaître la syntaxe, puis présente les requêtes une par
       une et obtiens sa validation explicite. Conserve chaque requête validée
@@ -126,6 +128,15 @@ valide pointant vers le vault.
           "query": {
             "query_mode": "pubmed",
             "term": "(\"gut microbiome\"[Title/Abstract] AND \"inflammatory bowel disease\"[Title/Abstract])"
+          }
+        },
+        {
+          "source": "eric",
+          "reason": "Couverture spécialisée des publications en sciences de l'éducation",
+          "query": {
+            "query_mode": "eric",
+            "search": "higher education AND generative AI",
+            "sort": "publicationdateyear desc"
           }
         }
       ]
@@ -186,8 +197,9 @@ valide pointant vers le vault.
 - **Ne JAMAIS inventer** un critère ou une variable. Si l'utilisateur est
   vague, redemander via `clarify`.
 - Au moins une source doit être sélectionnée. Les sources autorisées sont
-  `openalex` et `pubmed`, chacune une seule fois, avec une justification et
-  une requête structurée portant le `query_mode` correspondant.
+  `openalex`, `pubmed` et `eric`, chacune une seule fois, avec une
+  justification et une requête structurée portant le `query_mode`
+  correspondant (`search`, `pubmed` ou `eric`).
 - Le codebook est un artefact méthodologique figé : pas de variable ajoutée
   en cours de route sans repasser par cette skill.
 - Les critères doivent être **testables** : pas de « articles intéressants ».

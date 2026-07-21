@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 SUPPORTED_SOURCES = {
     "openalex": "search",
     "pubmed": "pubmed",
+    "eric": "eric",
 }
 
 

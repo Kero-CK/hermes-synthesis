@@ -24,6 +24,11 @@ PUBMED_QUERY = {
     "query_mode": "pubmed",
     "term": '("climate adaptation"[Title/Abstract] AND 2020:2024[dp])',
 }
+ERIC_QUERY = {
+    "query_mode": "eric",
+    "search": '"generative AI" AND "student feedback"',
+    "sort": "publicationdateyear desc",
+}
 
 
 def payload_for(sources):
@@ -97,6 +102,27 @@ class InitReviewTests(unittest.TestCase):
         self.assertIn("### Source : `pubmed`", protocol)
         self.assertIn(json.dumps(PUBMED_QUERY, ensure_ascii=False, indent=2), protocol)
 
+    def test_eric_only_is_recorded_in_protocol_and_manifest(self):
+        temp_dir, _, protocol, manifest = self.create_review(
+            payload_for([
+                {
+                    "source": "eric",
+                    "reason": "Couverture spécialisée des publications en éducation",
+                    "query": ERIC_QUERY,
+                }
+            ])
+        )
+        self.addCleanup(temp_dir.cleanup)
+
+        self.assertEqual(manifest["sources"], ["eric"])
+        self.assertEqual(manifest["queries"], {"eric": ERIC_QUERY})
+        self.assertEqual(
+            manifest["source_reasons"],
+            {"eric": "Couverture spécialisée des publications en éducation"},
+        )
+        self.assertIn("### Source : `eric`", protocol)
+        self.assertIn(json.dumps(ERIC_QUERY, ensure_ascii=False, indent=2), protocol)
+
     def test_both_sources_keep_order_reasons_and_exact_queries(self):
         sources = [
             {
@@ -128,6 +154,44 @@ class InitReviewTests(unittest.TestCase):
         self.assertLess(protocol.index("`openalex`"), protocol.index("`pubmed`"))
         self.assertIn('"search": "climate adaptation & resilience \\\"$\\\""', protocol)
         self.assertIn(json.dumps(PUBMED_QUERY, ensure_ascii=False, indent=2), protocol)
+
+    def test_three_sources_keep_exact_queries_and_reasons(self):
+        sources = [
+            {
+                "source": "openalex",
+                "reason": "Couverture multidisciplinaire générale",
+                "query": OPENALEX_QUERY,
+            },
+            {
+                "source": "pubmed",
+                "reason": "Couverture biomédicale spécialisée",
+                "query": PUBMED_QUERY,
+            },
+            {
+                "source": "eric",
+                "reason": "Couverture spécialisée des publications en éducation",
+                "query": ERIC_QUERY,
+            },
+        ]
+        temp_dir, _, protocol, manifest = self.create_review(payload_for(sources))
+        self.addCleanup(temp_dir.cleanup)
+
+        self.assertEqual(manifest["sources"], ["openalex", "pubmed", "eric"])
+        self.assertEqual(
+            manifest["queries"],
+            {"openalex": OPENALEX_QUERY, "pubmed": PUBMED_QUERY, "eric": ERIC_QUERY},
+        )
+        self.assertEqual(
+            manifest["source_reasons"],
+            {
+                "openalex": "Couverture multidisciplinaire générale",
+                "pubmed": "Couverture biomédicale spécialisée",
+                "eric": "Couverture spécialisée des publications en éducation",
+            },
+        )
+        self.assertLess(protocol.index("`openalex`"), protocol.index("`pubmed`"))
+        self.assertLess(protocol.index("`pubmed`"), protocol.index("`eric`"))
+        self.assertIn(json.dumps(ERIC_QUERY, ensure_ascii=False, indent=2), protocol)
 
     def test_missing_or_empty_sources_are_rejected_before_writing(self):
         invalid_payloads = [
@@ -171,6 +235,8 @@ class InitReviewTests(unittest.TestCase):
             {"source": "openalex", "reason": "r", "query": "search"},
             {"source": "pubmed", "reason": "r", "query": []},
             {"source": "pubmed", "reason": "r", "query": {}},
+            {"source": "eric", "reason": "r", "query": "search"},
+            {"source": "eric", "reason": "r", "query": {}},
         ]
         for entry in invalid_entries:
             with self.subTest(entry=entry):
@@ -185,6 +251,11 @@ class InitReviewTests(unittest.TestCase):
             },
             {
                 "source": "pubmed",
+                "reason": "r",
+                "query": {"query_mode": "search", "search": "x"},
+            },
+            {
+                "source": "eric",
                 "reason": "r",
                 "query": {"query_mode": "search", "search": "x"},
             },

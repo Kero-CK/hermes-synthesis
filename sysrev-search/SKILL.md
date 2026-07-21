@@ -22,7 +22,7 @@ requires:
 Interroger les bases scientifiques gratuites pour trouver des articles
 correspondant à la question de recherche, réconcilier avec les PDF déposés
 dans la dropzone, et produire un fichier `candidates.csv` traçable. Les
-connecteurs disponibles sont OpenAlex et PubMed.
+connecteurs disponibles sont OpenAlex, PubMed et ERIC.
 
 # Pré-conditions
 
@@ -61,6 +61,13 @@ connecteurs disponibles sont OpenAlex et PubMed.
    - PubMed utilise uniquement ESearch en POST (`usehistory=y`,
      `sort=relevance`) puis EFetch XML par lots de 200 maximum :
      https://www.ncbi.nlm.nih.gov/books/NBK25499/
+   - Pour ERIC, le script exige exactement un objet avec
+     `query_mode = "eric"` et un champ `search` non vide ; `sort` est
+     facultatif et est transmis tel quel. L'API JSON officielle ne requiert
+     pas de clé API : https://api.ies.ed.gov/eric/
+   - ERIC utilise `start`/`rows` pour la pagination, avec `rows` limité à 200,
+     et lit uniquement `response.numFound` comme compteur attendu. Le tri
+     explicite fourni dans la requête est conservé.
 
 3. **Fais valider les requêtes par l'utilisateur via `clarify`.** Montre
    chaque requête formatée et demande confirmation. Tant que l'utilisateur
@@ -87,6 +94,11 @@ connecteurs disponibles sont OpenAlex et PubMed.
          "pubmed": {
            "query_mode": "pubmed",
            "term": "(SME climate adaptation[Title/Abstract])"
+         },
+         "eric": {
+           "query_mode": "eric",
+           "search": "higher education AND generative AI",
+           "sort": "publicationdateyear desc"
          }
       }
    }
@@ -118,6 +130,10 @@ connecteurs disponibles sont OpenAlex et PubMed.
   PMCID renseigne `oa_url` avec l'URL PMC canonique
   `https://pmc.ncbi.nlm.nih.gov/articles/{PMCID}/` ; le texte intégral PMC est
   ensuite récupéré via EFetch XML par sysrev-fulltext.
+- **ERIC — provenance et accès.** ERIC est une source spécialisée en sciences
+  de l'éducation ; son API JSON officielle ne requiert pas de clé API.
+  `search` et `sort` sont conservés exactement dans la provenance, tandis que
+  l'identifiant ERIC devient `https://eric.ed.gov/?id=<ERIC_ID>`.
 - **Sci-Hub désactivé.** Ne pas utiliser ni proposer Sci-Hub.
 - **Épinglage de version.** Noter l'endpoint et la version de chaque API
   source utilisée dans `manifest.json`.
@@ -147,6 +163,14 @@ connecteurs disponibles sont OpenAlex et PubMed.
   exactement, `usehistory=y` et `sort=relevance` sont explicites, et chaque
   EFetch demande au plus 200 notices. Sans `NCBI_API_KEY`, les appels sont
   espacés pour rester à au plus 3 requêtes par seconde.
+
+- **ERIC — JSON et pagination bornée.** Fournir un objet avec
+  `query_mode = "eric"` et `search` non vide. L'endpoint officiel
+  `https://api.ies.ed.gov/eric/` reçoit `format=json`, `start`, `rows` (au
+  plus 200), les champs demandés et le `sort` exact éventuel. `numFound` doit
+  être un entier non négatif ; s'il est absent ou invalide, le statut est
+  `incomplete` avec `expected = null`. Une erreur de page conserve les notices
+  déjà reçues et ne devient jamais silencieusement `complete`.
 
 - **Tester la requête avant le script.** En cas de doute, lancer un appel
   API direct (curl ou Python one-liner) pour vérifier le compte de résultats
@@ -193,7 +217,7 @@ connecteurs disponibles sont OpenAlex et PubMed.
   et continuer → ça produirait un corpus partiel présenté comme complet.
 
 - **Détection d'incomplétude — 4 statuts distincts dans le manifest.**
-   `_openalex_search()` et `_pubmed_search()` retournent
+   `_openalex_search()`, `_pubmed_search()` et `_eric_search()` retournent
    `(results, expected_count, status, status_reason)` ; `expected_count` vaut
    `None` si le total de la source n'est pas fiable.
   avec `status` ∈ {"complete", "incomplete", "capped", "error"}. Le statut
@@ -207,8 +231,9 @@ connecteurs disponibles sont OpenAlex et PubMed.
   | `incomplete` | 429/5xx persistant, page abandonnée ou total inconnu | oui | relancer |
   | `error` | HTTP 4xx, exception réseau | oui | corriger requête |
 
-   Une réponse OpenAlex avec `meta.count = 0`, ou une réponse PubMed avec
-   `Count = 0`, est `complete`, avec `reason = "zero_results"`.
+   Une réponse OpenAlex avec `meta.count = 0`, une réponse PubMed avec
+   `Count = 0` ou une réponse ERIC avec `numFound = 0`, est `complete`, avec
+   `reason = "zero_results"`.
 
    **Le CSV est écrit après une exécution de recherche** (même en
    `error`/`incomplete`) — c'est le manifest qui porte le statut réel. Une
@@ -228,11 +253,13 @@ connecteurs disponibles sont OpenAlex et PubMed.
   `tuple[list[dict], int | None, SearchStatus, str]` et représente toujours
   `(results, expected_count, status, reason)`. `SearchStatus` vaut
   `complete`, `incomplete`, `capped` ou `error`. Le registre
-  `CONNECTOR_REGISTRY` contient `openalex` et `pubmed`. PubMed utilise
+  `CONNECTOR_REGISTRY` contient `openalex`, `pubmed` et `eric`. PubMed utilise
   `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi` comme endpoint
   déclaré, `fetch_endpoint` vaut
   `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi`,
   `api_version = "NCBI E-utilities"` et `query_mode = "pubmed"`.
+  ERIC utilise `https://api.ies.ed.gov/eric/`, `api_version = "ERIC API"` et
+  `query_mode = "eric"`, sans clé API obligatoire.
   `search_source(source, query)` interroge une seule source et valide ce
   contrat ; `mcp_search` reste son alias rétrocompatible. La validation
   exige une liste `results`, un `expected_count` entier supérieur ou égal à

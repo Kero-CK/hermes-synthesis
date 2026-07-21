@@ -7,7 +7,7 @@ fusionne les résultats, réconcilie avec la dropzone par DOI, et écrit
 candidates.csv avec provenance complète.
 
 Usage:
-  python3 search.py '<json>'            # mode réel (OpenAlex + PubMed câblés)
+  python3 search.py '<json>'            # mode réel (OpenAlex + PubMed + ERIC câblés)
   python3 search.py '<json>' --mock     # mode test avec données fictives
 
 JSON attendu:
@@ -20,6 +20,11 @@ JSON attendu:
       "pubmed": {
           "query_mode": "pubmed",
           "term": "(climate adaptation[Title/Abstract])"
+      },
+      "eric": {
+          "query_mode": "eric",
+          "search": "higher education AND generative AI",
+          "sort": "publicationdateyear desc"
       }
   }}
 
@@ -37,6 +42,8 @@ Sources câblées :
     https://developers.openalex.org/api-reference/authentication
   - pubmed : ESearch + EFetch XML via les E-utilities NCBI, avec NCBI_EMAIL
     obligatoire et NCBI_API_KEY facultative
+  - eric : API JSON officielle de l'Institute of Education Sciences, sans clé
+    obligatoire, avec pagination ``start``/``rows``
 
 Le script ne prend AUCUNE décision de recherche : les requêtes sont déjà
 validées par l'humain en amont. Il fait l'exécution mécanique.
@@ -84,6 +91,20 @@ class PreparedPubMedQuery(TypedDict):
     params: dict[str, str]
 
 
+class EricSearchQuery(TypedDict):
+    query_mode: Literal["eric"]
+    search: str
+    sort: NotRequired[str]
+
+
+EricQueryInput: TypeAlias = EricSearchQuery
+
+
+class PreparedEricQuery(TypedDict):
+    query_mode: Literal["eric"]
+    params: dict[str, str]
+
+
 VALID_SEARCH_STATUSES = frozenset({"complete", "incomplete", "capped", "error"})
 
 
@@ -107,8 +128,13 @@ class InvalidPubMedQuery(ValueError):
     """Raised when a PubMed query is not in the supported input format."""
 
 
+class InvalidEricQuery(ValueError):
+    """Raised when an ERIC query is not in the supported input format."""
+
+
 _OPENALEX_QUERY_KEYS = frozenset({"query_mode", "search", "filter"})
 _PUBMED_QUERY_KEYS = frozenset({"query_mode", "term"})
+_ERIC_QUERY_KEYS = frozenset({"query_mode", "search", "sort"})
 
 PUBMED_ESEARCH_ENDPOINT = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 PUBMED_EFETCH_ENDPOINT = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -116,6 +142,17 @@ NCBI_TOOL = "hermes_synthesis"
 PUBMED_BATCH_SIZE = 200
 NCBI_MAX_RETRIES = 4
 NCBI_RETRYABLE_HTTP_CODES = frozenset({429, 500, 502, 503, 504})
+
+ERIC_ENDPOINT = "https://api.ies.ed.gov/eric/"
+ERIC_MIN_PAGE_SIZE = 20
+ERIC_PAGE_SIZE = 200
+ERIC_MAX_RETRIES = 4
+ERIC_RETRYABLE_HTTP_CODES = frozenset({429, 500, 502, 503, 504})
+ERIC_FIELDS = (
+    "id,title,author,source,publicationdateyear,description,subject,"
+    "peerreviewed,audience,educationlevel,language,publicationtype,publisher,"
+    "url,e_fulltextauth,ieslinkpublication"
+)
 
 
 def validate_openalex_query(query: object) -> OpenAlexQueryInput:
@@ -216,6 +253,55 @@ def prepare_pubmed_query(query: object) -> PreparedPubMedQuery:
     return {"query_mode": "pubmed", "params": {"term": validated["term"]}}
 
 
+def validate_eric_query(query: object) -> EricQueryInput:
+    """Validate the structured ERIC query without changing its text."""
+    prefix = "Requête ERIC invalide"
+    if isinstance(query, str):
+        raise InvalidEricQuery(
+            f"{prefix} : une chaîne simple est refusée ; un objet avec "
+            "query_mode='eric' et search= est requis"
+        )
+    if not isinstance(query, dict):
+        raise InvalidEricQuery(
+            f"{prefix} : un objet JSON avec query_mode='eric' et search est requis"
+        )
+
+    unexpected = set(query) - _ERIC_QUERY_KEYS
+    if unexpected:
+        raise InvalidEricQuery(
+            f"{prefix} : champs supplémentaires interdits : "
+            f"{sorted(unexpected, key=str)}"
+        )
+    if query.get("query_mode") != "eric":
+        raise InvalidEricQuery(
+            f"{prefix} : query_mode doit être exactement 'eric'"
+        )
+
+    search_value = query.get("search")
+    if not isinstance(search_value, str):
+        raise InvalidEricQuery(f"{prefix} : search doit être une chaîne")
+    if not search_value.strip():
+        raise InvalidEricQuery(f"{prefix} : search ne peut pas être vide")
+
+    if "sort" in query:
+        sort_value = query.get("sort")
+        if not isinstance(sort_value, str):
+            raise InvalidEricQuery(f"{prefix} : sort doit être une chaîne")
+        if not sort_value.strip():
+            raise InvalidEricQuery(f"{prefix} : sort ne peut pas être vide")
+
+    return query
+
+
+def prepare_eric_query(query: object) -> PreparedEricQuery:
+    """Return exact ERIC search and optional sort parameters."""
+    validated = validate_eric_query(query)
+    params = {"search": validated["search"]}
+    if "sort" in validated:
+        params["sort"] = validated["sort"]
+    return {"query_mode": "eric", "params": params}
+
+
 def serialize_query_for_csv(query: OpenAlexQueryInput) -> str:
     """Serialize a validated structured query for candidates.csv provenance."""
     validated = validate_openalex_query(query)
@@ -238,12 +324,25 @@ def serialize_pubmed_query_for_csv(query: PubMedQueryInput) -> str:
     )
 
 
+def serialize_eric_query_for_csv(query: EricQueryInput) -> str:
+    """Serialize an ERIC query while preserving exact search and sort text."""
+    validated = validate_eric_query(query)
+    return json.dumps(
+        validated,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def serialize_source_query_for_csv(source: str, query: SourceQueryInput) -> str:
     """Serialize provenance without coupling non-OpenAlex sources to OpenAlex."""
     if source == "openalex":
         return serialize_query_for_csv(query)
     if source == "pubmed":
         return serialize_pubmed_query_for_csv(query)
+    if source == "eric":
+        return serialize_eric_query_for_csv(query)
     if isinstance(query, str):
         return query
     if isinstance(query, dict):
@@ -732,6 +831,295 @@ def _pubmed_search(query: SourceQueryInput, max_results: int | None = None) -> S
     return all_results[:hard_limit], expected_count, "complete", ""
 
 
+def _eric_clean_text(value: object) -> str:
+    """Flatten an ERIC scalar/list field without changing its meaning."""
+    import html
+    import re
+
+    if isinstance(value, list):
+        parts = [_eric_clean_text(item) for item in value]
+        return "; ".join(part for part in parts if part)
+    if isinstance(value, dict):
+        for key in ("name", "value", "text", "label"):
+            if key in value:
+                return _eric_clean_text(value[key])
+        return ""
+    if value is None or isinstance(value, bool):
+        return ""
+    text = html.unescape(str(value))
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _eric_field(doc: dict, *names: str) -> object:
+    for name in names:
+        if name in doc and doc[name] not in (None, "", []):
+            return doc[name]
+    return ""
+
+
+def _eric_doi(doc: dict) -> str:
+    """Extract and normalize an ERIC DOI from DOI or URL metadata."""
+    import re
+
+    direct = _eric_field(doc, "doi", "DOI", "identifierdoi", "identifiersdoi")
+    candidates = []
+    if direct:
+        candidates.append(_eric_clean_text(direct))
+    for key in (
+        "url",
+        "URL",
+        "ieslinkpublication",
+        "e_fulltext",
+        "fulltexturl",
+        "full_text_url",
+    ):
+        value = _eric_field(doc, key)
+        if value:
+            candidates.append(_eric_clean_text(value))
+
+    pattern = re.compile(r"10\.\d{4,9}/[^\s\"<>]+", re.IGNORECASE)
+    for candidate in candidates:
+        match = pattern.search(candidate)
+        if not match:
+            continue
+        doi = match.group(0).rstrip(".,;:)]}")
+        if doi.lower().startswith(("https://doi.org/", "http://doi.org/")):
+            doi = doi.split("/", 3)[-1]
+        return doi
+    return ""
+
+
+def _eric_url(doc: dict) -> str:
+    """Return the first usable ERIC URL supplied by the notice."""
+    for key in (
+        "url",
+        "URL",
+        "ieslinkpublication",
+        "e_fulltext",
+        "fulltexturl",
+        "full_text_url",
+    ):
+        value = _eric_field(doc, key)
+        if isinstance(value, list):
+            values = value
+        else:
+            values = [value]
+        for item in values:
+            candidate = _eric_clean_text(item)
+            if candidate.startswith(("https://", "http://")):
+                return candidate
+    return ""
+
+
+def _eric_notice_to_result(doc: object) -> dict | None:
+    """Map one official ERIC notice to the common Hermes result shape."""
+    if not isinstance(doc, dict):
+        return None
+    eric_id = _eric_clean_text(
+        _eric_field(doc, "id", "ERICID", "ericid", "eric_id")
+    )
+    if not eric_id:
+        return None
+
+    import urllib.parse
+
+    return {
+        "source": "eric",
+        "title": _eric_clean_text(_eric_field(doc, "title", "Title")),
+        "doi": _eric_doi(doc),
+        "source_id": (
+            "https://eric.ed.gov/?id="
+            f"{urllib.parse.quote(eric_id, safe='')}"
+        ),
+        "year": _eric_clean_text(
+            _eric_field(
+                doc,
+                "publicationdateyear",
+                "publicationDateYear",
+                "publication_year",
+                "year",
+            )
+        ),
+        "abstract": _eric_clean_text(
+            _eric_field(doc, "description", "abstract", "Abstract")
+        ),
+        "oa_url": _eric_url(doc),
+        "authors": _eric_clean_text(_eric_field(doc, "author", "authors")),
+        "publication_type": _eric_clean_text(
+            _eric_field(doc, "publicationtype", "publicationType", "publication_type")
+        ),
+        "subjects": _eric_clean_text(
+            _eric_field(doc, "subject", "subjects", "descriptors")
+        ),
+    }
+
+
+def _parse_eric_response(payload: bytes | str) -> tuple[int | None, list[dict]]:
+    """Parse the official ERIC JSON envelope ``response.numFound/docs``."""
+    if isinstance(payload, bytes):
+        text = payload.decode("utf-8-sig")
+    else:
+        text = payload
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise ValueError("invalid ERIC response")
+    response = parsed.get("response", parsed)
+    if not isinstance(response, dict):
+        raise ValueError("invalid ERIC response envelope")
+    count_value = response.get("numFound")
+    if count_value is None:
+        count_value = response.get("numfound")
+    docs = response.get("docs", [])
+    if docs is None:
+        docs = []
+    if not isinstance(docs, list):
+        raise ValueError("invalid ERIC docs")
+    return _parse_nonnegative_count(count_value), docs
+
+
+def _eric_request(params: dict[str, str]) -> tuple[bytes | None, str]:
+    """GET one ERIC page with retries and no credential-bearing parameters."""
+    import time
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    request_url = f"{ERIC_ENDPOINT}?{urllib.parse.urlencode(params)}"
+    request = urllib.request.Request(
+        request_url,
+        headers={"User-Agent": "HermesSynthesis/0.1"},
+        method="GET",
+    )
+    last_error_code = None
+    for attempt in range(ERIC_MAX_RETRIES):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read(), ""
+        except urllib.error.HTTPError as exc:
+            last_error_code = exc.code
+            if exc.code not in ERIC_RETRYABLE_HTTP_CODES:
+                return None, f"HTTP {exc.code}"
+            if attempt < ERIC_MAX_RETRIES - 1:
+                delay = 2 ** attempt
+                print(
+                    f"  ⚠️  ERIC HTTP {exc.code} — tentative "
+                    f"{attempt + 1}/{ERIC_MAX_RETRIES}, retry dans {delay}s...",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+            else:
+                print(
+                    f"  ⚠️  ERIC HTTP {exc.code} — tentative "
+                    f"{attempt + 1}/{ERIC_MAX_RETRIES} (dernier essai).",
+                    file=sys.stderr,
+                )
+        except Exception as exc:
+            return None, f"exception: {exc}"
+
+    code = str(last_error_code) if last_error_code is not None else "429/5xx"
+    return (
+        None,
+        f"requête abandonnée après {ERIC_MAX_RETRIES} tentatives (HTTP {code})",
+    )
+
+
+def _eric_search(query: SourceQueryInput, max_results: int | None = None) -> SearchResult:
+    """Search ERIC through its JSON API using explicit start/rows pagination."""
+    try:
+        prepared_query = prepare_eric_query(query)
+    except InvalidEricQuery as exc:
+        print(f"  ❌ {exc}", file=sys.stderr)
+        return [], None, "error", str(exc)
+
+    hard_limit = _resolve_hard_limit(max_results)
+    exact_params = prepared_query["params"]
+    all_results: list[dict] = []
+    start = 0
+    expected_count: int | None = None
+    first_page = True
+
+    while True:
+        target_for_request = (
+            hard_limit
+            if expected_count is None
+            else min(expected_count, hard_limit)
+        )
+        remaining = target_for_request - len(all_results)
+        rows = min(ERIC_PAGE_SIZE, max(ERIC_MIN_PAGE_SIZE, remaining))
+        params = {
+            "search": exact_params["search"],
+            "format": "json",
+            "start": str(start),
+            "rows": str(rows),
+            "fields": ERIC_FIELDS,
+        }
+        if "sort" in exact_params:
+            params["sort"] = exact_params["sort"]
+
+        payload, request_reason = _eric_request(params)
+        if payload is None:
+            if first_page:
+                return [], None, "error", f"ERIC: {request_reason}"
+            return all_results, expected_count, "incomplete", f"ERIC: {request_reason}"
+
+        try:
+            page_count, docs = _parse_eric_response(payload)
+        except Exception as exc:
+            safe_reason = str(exc)
+            if first_page:
+                return [], None, "error", f"ERIC JSON invalide: {safe_reason}"
+            return all_results, expected_count, "incomplete", (
+                f"ERIC JSON invalide: {safe_reason}"
+            )
+
+        if page_count is None:
+            return (
+                all_results,
+                None if first_page else expected_count,
+                "incomplete",
+                "missing_or_invalid_expected_count",
+            )
+        if first_page:
+            expected_count = page_count
+        elif page_count != expected_count:
+            return all_results, expected_count, "incomplete", (
+                "ERIC numFound incohérent entre les pages"
+            )
+
+        if expected_count == 0:
+            return [], 0, "complete", "zero_results"
+        if hard_limit == 0:
+            return [], expected_count, "capped", "plafond 0 atteint"
+
+        if not docs:
+            return all_results, expected_count, "incomplete", (
+                f"page ERIC vide à partir de start={start}"
+            )
+
+        for doc in docs:
+            result = _eric_notice_to_result(doc)
+            if result is None:
+                return all_results, expected_count, "incomplete", (
+                    "invalid_eric_notice"
+                )
+            all_results.append(result)
+            if len(all_results) >= min(expected_count, hard_limit):
+                break
+
+        target_count = min(expected_count, hard_limit)
+        if len(all_results) >= target_count:
+            all_results = all_results[:target_count]
+            if expected_count > hard_limit:
+                return all_results, expected_count, "capped", (
+                    f"arrêt volontaire à {hard_limit} (requête trop large)"
+                )
+            return all_results, expected_count, "complete", ""
+
+        start += len(docs)
+        first_page = False
+
+
 def _openalex_search(query: SourceQueryInput, max_results: int | None = None) -> SearchResult:
     """
     Interroge l'API OpenAlex et retourne (results, expected_count, status, status_reason).
@@ -956,6 +1344,12 @@ CONNECTOR_REGISTRY: dict[str, ConnectorSpec] = {
         "api_version": "NCBI E-utilities",
         "query_mode": "pubmed",
     },
+    "eric": {
+        "search": _eric_search,
+        "endpoint": ERIC_ENDPOINT,
+        "api_version": "ERIC API",
+        "query_mode": "eric",
+    },
 }
 
 
@@ -965,7 +1359,7 @@ def search_source(source: str, query: SourceQueryInput) -> SearchResult:
     if spec is None:
         raise NotImplementedError(
             f"Source '{source}' pas encore câblée. Sources disponibles : "
-            "openalex, pubmed.\n"
+            "openalex, pubmed, eric.\n"
             f"Utilise --mock pour tester le pipeline en attendant."
         )
     result = spec["search"](query)
@@ -1069,6 +1463,11 @@ def mock_search(source: str, query: SourceQueryInput) -> SearchResult:
         try:
             validate_pubmed_query(query)
         except InvalidPubMedQuery as exc:
+            return [], None, "error", str(exc)
+    elif source == "eric":
+        try:
+            validate_eric_query(query)
+        except InvalidEricQuery as exc:
             return [], None, "error", str(exc)
     results = MOCK_DATA.get(source, [])
     return _validate_search_result(source, (results, len(results), "complete", "mock"))
@@ -1176,6 +1575,12 @@ def main(rid: str, queries: dict[str, SourceQueryInput], use_mock: bool = False)
             try:
                 validate_pubmed_query(query)
             except InvalidPubMedQuery as exc:
+                print(f"❌ {exc}", file=sys.stderr)
+                raise
+        elif source == "eric":
+            try:
+                validate_eric_query(query)
+            except InvalidEricQuery as exc:
                 print(f"❌ {exc}", file=sys.stderr)
                 raise
 
