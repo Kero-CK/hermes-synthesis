@@ -155,6 +155,9 @@ PMC_EFETCH_ENDPOINT = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi
 PMC_BATCH_SIZE = 200
 PMC_REQUEST_INTERVAL_WITHOUT_KEY = 1 / 3
 PMC_REQUEST_INTERVAL_WITH_KEY = 1 / 10
+UNPAYWALL_ENDPOINT = "https://api.unpaywall.org/v2"
+UNPAYWALL_MAX_ATTEMPTS = 4
+UNPAYWALL_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 _PMC_URL = re.compile(
     r"^https://pmc\.ncbi\.nlm\.nih\.gov/articles/(PMC[0-9]+)(?:/pdf)?/?$"
 )
@@ -457,6 +460,171 @@ def download_pdf(url: str, timeout: int = 30) -> str | None:
     except Exception as e:
         print(f"    ⚠️  Download failed: {e}", file=sys.stderr)
         return None
+
+
+def _unpaywall_urls(payload: dict) -> list[str]:
+    """Retourne les URLs OA Unpaywall dans l'ordre de priorité documenté."""
+    locations = []
+    best_location = payload.get("best_oa_location")
+    if isinstance(best_location, dict):
+        locations.append(best_location)
+    for location in payload.get("oa_locations", []) or []:
+        if isinstance(location, dict):
+            locations.append(location)
+
+    urls = []
+    seen = set()
+    for location in locations:
+        for field in ("url_for_pdf", "url"):
+            url = location.get(field, "")
+            if not isinstance(url, str):
+                continue
+            url = url.strip()
+            if not url.startswith(("http://", "https://")) or url in seen:
+                continue
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+def fetch_unpaywall(doi: str, timeout: int = 30) -> dict:
+    """Interroge Unpaywall sans jamais exposer l'adresse email dans les logs."""
+    normalized_doi = normalize_identity_doi(doi)
+    if not normalized_doi:
+        return {"reason": "unpaywall_doi_absent"}
+
+    email = os.environ.get("UNPAYWALL_EMAIL", "").strip()
+    if not email:
+        return {"reason": "unpaywall_email_missing"}
+
+    endpoint = (
+        f"{UNPAYWALL_ENDPOINT}/"
+        f"{urllib.parse.quote(normalized_doi, safe='')}"
+    )
+    request_url = endpoint + "?" + urllib.parse.urlencode({"email": email})
+
+    for attempt in range(UNPAYWALL_MAX_ATTEMPTS):
+        request = urllib.request.Request(
+            request_url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "HermesSynthesis/0.1",
+            },
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            if (
+                exc.code in UNPAYWALL_RETRY_STATUS_CODES
+                and attempt < UNPAYWALL_MAX_ATTEMPTS - 1
+            ):
+                time.sleep(2 ** attempt)
+                continue
+            if exc.code == 404:
+                return {"reason": "unpaywall_doi_unknown"}
+            return {"reason": f"unpaywall_api_http_{exc.code}"}
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return {"reason": "unpaywall_api_error"}
+        except (UnicodeError, json.JSONDecodeError):
+            return {"reason": "unpaywall_api_invalid_response"}
+    else:
+        return {"reason": "unpaywall_api_error"}
+
+    if not isinstance(payload, dict):
+        return {"reason": "unpaywall_api_invalid_response"}
+
+    returned_doi = normalize_identity_doi(payload.get("doi", ""))
+    if not returned_doi or returned_doi != normalized_doi:
+        return {"reason": "unpaywall_identity_mismatch"}
+
+    urls = _unpaywall_urls(payload)
+    if not urls:
+        return {"reason": "unpaywall_no_open_copy"}
+
+    return {
+        "reason": "",
+        "doi": returned_doi,
+        "title": str(payload.get("title", "") or ""),
+        "urls": urls,
+    }
+
+
+def validate_unpaywall_identity(
+    lookup: dict,
+    markdown: str,
+    candidate_doi: str,
+    candidate_title: str,
+) -> tuple[bool, str]:
+    """Valide le DOI API et une identité vérifiable dans le Markdown."""
+    expected_doi = normalize_identity_doi(candidate_doi)
+    returned_doi = normalize_identity_doi(lookup.get("doi", ""))
+    expected_title = normalize_identity_title(candidate_title)
+
+    if not expected_doi or not returned_doi or returned_doi != expected_doi:
+        return False, "unpaywall_identity_mismatch"
+
+    doi_pattern = r"\s*".join(re.escape(char) for char in expected_doi)
+    doi_in_markdown = bool(
+        re.search(
+            rf"(?<![a-z0-9]){doi_pattern}(?![a-z0-9])",
+            markdown.casefold(),
+        )
+    )
+    title_in_markdown = bool(
+        expected_title
+        and expected_title in normalize_identity_title(markdown)
+    )
+    if not (doi_in_markdown or title_in_markdown):
+        return False, "unpaywall_identity_mismatch"
+    return True, ""
+
+
+def retrieve_unpaywall_pdf(
+    doi: str,
+    candidate_title: str,
+) -> tuple[str | None, str]:
+    """Récupère et valide le dernier recours PDF fourni par Unpaywall."""
+    lookup = fetch_unpaywall(doi)
+    lookup_reason = lookup.get("reason", "")
+    if lookup_reason:
+        return None, lookup_reason
+
+    saw_refused = False
+    saw_invalid = False
+    saw_identity_mismatch = False
+    for url in lookup.get("urls", []):
+        pdf_path = download_pdf(url)
+        if not pdf_path:
+            saw_refused = True
+            continue
+        try:
+            content, _ = _parse_pdf_file(
+                pdf_path, "PDF parsé avec pymupdf4llm (Unpaywall)"
+            )
+        finally:
+            if os.path.exists(pdf_path):
+                os.unlink(pdf_path)
+        if not content:
+            saw_invalid = True
+            continue
+        identity_ok, identity_reason = validate_unpaywall_identity(
+            lookup, content, doi, candidate_title
+        )
+        if not identity_ok:
+            saw_identity_mismatch = True
+            continue
+        return content, "PDF parsé avec pymupdf4llm (Unpaywall)"
+
+    if saw_identity_mismatch:
+        return None, "unpaywall_identity_mismatch"
+    if saw_invalid:
+        return None, "unpaywall_invalid_document"
+    if saw_refused:
+        return None, "unpaywall_url_refused"
+    return None, "unpaywall_invalid_document"
 
 
 # ---------------------------------------------------------------------------
@@ -847,6 +1015,16 @@ def main(rid: str, use_mock: bool = False):
                     reason += "; PDF non disponible dans la dropzone"
                 else:
                     reason = "PDF non disponible (ni OA non-PMC, ni dropzone)"
+
+            if content is None and not identity_conflict:
+                unpaywall_content, unpaywall_reason = retrieve_unpaywall_pdf(
+                    actual_doi, candidate_title
+                )
+                if unpaywall_content:
+                    content = unpaywall_content
+                    reason = unpaywall_reason
+                elif unpaywall_reason:
+                    reason = f"{reason}; {unpaywall_reason}" if reason else unpaywall_reason
 
         if content and len(content) > 500:
             if not reused_existing:

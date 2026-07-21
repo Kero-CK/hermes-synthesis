@@ -2,8 +2,9 @@
 name: sysrev-fulltext
 description: >
   Récupère et parse les textes intégraux des articles inclus après screening.
-  Récupère les articles PMC par EFetch XML, télécharge les PDF non-PMC et
-  parse les PDF dropzone, puis convertit le tout en Markdown exploitable.
+  Récupère les articles PMC par EFetch XML, télécharge les PDF non-PMC,
+  utilise Unpaywall en dernier recours pour les DOI inclus, puis parse les
+  PDF dropzone en Markdown exploitable.
   Correspond au module M5 du pipeline Hermes Synthesis.
 inputs:
   - /reviews/<id>/decisions.jsonl (décisions de screening finales)
@@ -16,7 +17,6 @@ outputs:
     "fulltext_not_retrieved") mis à jour
   - manifest.json mis à jour
 requires:
-  env: []
   tools: [terminal]
   scripts: [scripts/fulltext.py]
 ---
@@ -26,7 +26,8 @@ requires:
 Récupérer le texte intégral de chaque article inclus lors du screening.
 Pour les notices PMC, utiliser EFetch XML officiel et convertir le JATS en
 Markdown. Pour les autres articles, utiliser l'URL open access puis la
-dropzone (PDF fournis par l'utilisateur). Convertir en Markdown pour les
+dropzone (PDF fournis par l'utilisateur). Unpaywall ne sert qu'en dernier
+recours pour un article déjà inclus avec DOI. Convertir en Markdown pour les
 étapes suivantes (extraction notamment).
 
 # Pré-conditions
@@ -60,9 +61,13 @@ dropzone (PDF fournis par l'utilisateur). Convertir en Markdown pour les
      résumé, titres de sections et paragraphes ; un texte de 500 caractères
      ou moins est refusé
    - Pour une URL OA non-PMC, télécharge puis parse le PDF via
-     `pymupdf4llm` en mode réel ; après échec, essaie la dropzone
-   - Pour un PMCID sans corps exploitable, essaie ensuite la dropzone ; il ne
-     faut jamais télécharger directement `.../articles/PMC.../pdf/`
+     `pymupdf4llm` en mode réel
+   - Après l'échec de l'URL OA, essaie le PDF local dans la dropzone
+   - En dernier recours seulement, si le DOI est non vide, consulte
+     `https://api.unpaywall.org/v2/{doi}?email={UNPAYWALL_EMAIL}`
+   - Pour un PMCID sans corps exploitable, conserve cet ordre et ne contourne
+     jamais une contradiction d'identité PMC ; il ne faut jamais télécharger
+     directement `.../articles/PMC.../pdf/`
    - Écrit le résultat dans `sources/<doi_safe>.md`
    - Si le parsing échoue, marque `retrieval_failed`
 
@@ -77,6 +82,31 @@ dropzone (PDF fournis par l'utilisateur). Convertir en Markdown pour les
   avec `NCBI_EMAIL` obligatoire et `NCBI_API_KEY` facultative. Une erreur
   globale EFetch arrête le run avant toute écriture de décisions ou de
   compteurs. Les secrets ne sont jamais journalisés.
+- **Unpaywall dernier recours.** Unpaywall n'est jamais une source de
+  recherche : il est appelé uniquement pour un article déjà inclus avec DOI,
+  après l'échec de l'URL OA et de la dropzone. `UNPAYWALL_EMAIL` est requis
+  seulement à cet instant et est transmis à Unpaywall comme adresse de
+  contact. L'URL complète de l'appel, l'e-mail et les éventuelles clés ne sont
+  jamais écrits dans les logs, décisions ou manifestes.
+- **Validation Unpaywall.** Le DOI retourné par l'API doit être présent et
+  correspondre exactement au DOI demandé après normalisation ; son absence ou
+  sa différence donne `unpaywall_identity_mismatch`. Priorité à
+  `best_oa_location.url_for_pdf`, puis `best_oa_location.url`, puis aux autres
+  `oa_locations` dédupliquées. Chaque fichier doit être un PDF réel, parsable
+  et produire plus de 500 caractères. Le Markdown doit contenir le DOI
+  candidat normalisé ou le titre candidat normalisé, dans son contenu ou son
+  titre principal ; sinon le document est refusé avant écriture.
+- **Raisons Unpaywall distinctes.** Les échecs sont journalisés avec
+  `unpaywall_doi_absent`, `unpaywall_email_missing`,
+  `unpaywall_doi_unknown`, `unpaywall_no_open_copy`,
+  `unpaywall_url_refused`, `unpaywall_invalid_document` ou
+  `unpaywall_identity_mismatch` selon le cas. Les retries sont limités à HTTP
+  429 et 5xx, sans attente après le dernier essai.
+- **Périmètre.** Unpaywall ne modifie jamais `candidates.csv`, les DOI,
+  `source_id`, la provenance, la requête, la déduplication, le screening, les
+  compteurs d'identification ou `manifest.search_meta`. Seuls les événements
+  et compteurs du stage fulltext peuvent refléter un texte effectivement
+  récupéré.
 - **Nom de fichier sûr.** Remplacer `/` par `_` dans les DOI pour les
   noms de fichiers (`10.1234_mock001.md`).
 - **Chemin d'échec.** Parsing raté → `retrieval_failed` journalisé dans

@@ -205,6 +205,9 @@ connecteurs disponibles sont OpenAlex, PubMed et ERIC.
   `UNPAYWALL_EMAIL` depuis l'environnement pour le header `User-Agent`
   (`mailto:`). Sans cette variable, fallback sur `hermes-synthesis@example.org`.
   Cette adresse sert uniquement de contact dans le User-Agent.
+  Le connecteur de recherche n'appelle pas l'API Unpaywall ; le fallback
+  Unpaywall éventuel appartient exclusivement à `sysrev-fulltext` pour un
+  article déjà inclus avec DOI.
 
 - **HTTP 429/5xx — retry avec backoff exponentiel, JAMAIS sauter une page.**
   Sur un 429 (rate limit), 500, 502, 503, ou 504 (erreur serveur temporaire),
